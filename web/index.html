@@ -53,7 +53,9 @@ a{color:var(--accent)}
 .chat-item:hover{background:var(--soft)}
 .chat-item.on{background:var(--accent-soft)}
 .chat-item .x{opacity:0;border:0;background:none;cursor:pointer;color:var(--faint);padding:0 2px}
-.chat-item:hover .x{opacity:1}
+.chat-item:hover .x,.chat-item:focus-within .x{opacity:1}
+.chat-item .x:hover{color:var(--ink)}
+.chat-item input.rename{flex:1;min-width:0;font:inherit;font-size:14px;padding:3px 6px;border:1px solid var(--accent);border-radius:6px;background:var(--panel);color:var(--ink)}
 .sidefoot{border-top:1px solid var(--line);padding:12px 16px;font-size:12px;color:var(--muted);display:grid;gap:6px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:6px;vertical-align:1px}
 .dot.stale{background:var(--warn)}
@@ -73,6 +75,18 @@ a{color:var(--accent)}
 .suggest button{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:12px 14px;cursor:pointer;font-size:14px;line-height:1.4;box-shadow:var(--shadow)}
 .suggest button:hover{border-color:var(--accent)}
 .suggest small{display:block;color:var(--faint);font-size:12px;margin-bottom:2px}
+.qwrap{align-self:flex-end;max-width:80%;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.qwrap .q{max-width:100%}
+.qact{display:flex;gap:2px;opacity:0;transition:opacity .15s}
+.qwrap:hover .qact,.qwrap:focus-within .qact{opacity:1}
+@media (hover:none){.qact{opacity:1}.chat-item .x{opacity:1}}
+.qact button,.foot .act{border:0;background:none;color:var(--faint);cursor:pointer;font-size:12px;font-weight:600;padding:3px 6px;border-radius:6px}
+.qact button:hover,.foot .act:hover{color:var(--ink);background:var(--soft)}
+.qedit{align-self:stretch;display:flex;flex-direction:column;gap:8px;background:var(--panel);border:1px solid var(--accent);border-radius:14px;padding:10px}
+.qedit textarea{font:inherit;font-size:15px;border:0;outline:0;resize:vertical;min-height:64px;background:none;color:var(--ink)}
+.qedit .row{display:flex;justify-content:flex-end;gap:8px}
+.qedit .row button{border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;font-weight:600}
+.qedit .row button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .q{align-self:flex-end;max-width:80%;background:var(--user);padding:10px 14px;border-radius:16px 16px 4px 16px;white-space:pre-wrap;word-wrap:break-word}
 .a{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);min-width:0}
 .a .answer p{margin:0 0 8px}
@@ -262,6 +276,7 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
   .top{display:flex}
   .suggest{grid-template-columns:1fr}
   .q{max-width:92%}
+  .qwrap{max-width:92%}
   .a{padding:14px}
   .scroll{padding:16px 12px 8px}
   .composer{padding:8px 10px calc(10px + env(safe-area-inset-bottom))}
@@ -498,6 +513,22 @@ function tableHtml(tb, st){
   const head = `<th class="rn">#</th>` + tb.columns.map((c, i) => `<th class="${tb.numeric[i] ? "n" : ""}" data-col="${i}" title="Sort">${esc(colName(c))}${st.sortCol === i ? ((st.sortDir || 1) > 0 ? " ↑" : " ↓") : ""}</th>`).join("");
   return `<table><thead><tr>${head}</tr></thead><tbody>${tbodyHtml(tb, st).html}</tbody></table>`;
 }
+// Copy to clipboard (falls back to a hidden textarea where the clipboard API isn't allowed).
+async function copyText(text, what = "Copied"){
+  try { await navigator.clipboard.writeText(text); }
+  catch { const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch {} ta.remove(); }
+  toast(what);
+}
+// Answer as plain text: no markdown stars, takeaways without numbers dropped (same as on screen).
+function plainAnswer(text){
+  return friendly(text).split("\n").filter(l => !(/^\s*Takeaway:/i.test(l) && !/\d/.test(l)))
+    .map(l => l.replace(/\*\*(.+?)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/^\s*[-*•]\s+/, "• ").replace(/^#+\s*/, "")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+// Table as tab-separated text, so it pastes straight into Sheets or Excel.
+function tsv(t){
+  const c = v => String(v ?? "").replace(/[\t\n\r]+/g, " ");
+  return [t.columns.map(x => c(colName(x))).join("\t"), ...t.rows.map(r => r.map(c).join("\t"))].join("\n");
+}
 function csv(t){
   const q = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   return [t.columns.map(c => q(colName(c))).join(","), ...t.rows.map(r => r.map(q).join(","))].join("\n");
@@ -507,7 +538,7 @@ function csv(t){
 function renderSide(){
   const el = $("#chats");
   if (!chats.length) { el.innerHTML = ""; return; }
-  el.innerHTML = "<h4>Recent</h4>" + chats.map(c => `<div class="chat-item ${c.id === currentId ? "on" : ""}" data-id="${c.id}" role="button" tabindex="0"><span>${esc(c.title)}</span><button class="x" data-del="${c.id}" aria-label="Delete chat">✕</button></div>`).join("");
+  el.innerHTML = "<h4>Recent</h4>" + chats.map(c => `<div class="chat-item ${c.id === currentId ? "on" : ""}" data-id="${c.id}" role="button" tabindex="0"><span>${esc(c.title)}</span><button class="x" data-rename="${c.id}" aria-label="Rename chat" title="Rename">✎</button><button class="x" data-del="${c.id}" aria-label="Delete chat" title="Delete">✕</button></div>`).join("");
 }
 function renderThread(){
   const th = $("#thread"); th.innerHTML = "";
@@ -519,9 +550,47 @@ function renderThread(){
   }
   for (const t of c.turns) th.appendChild(turnEl(t));
 }
+function renameChat(id){
+  const c = chats.find(x => x.id === id); const item = document.querySelector(`.chat-item[data-id="${CSS.escape(id)}"]`);
+  if (!c || !item) return;
+  const span = item.querySelector("span"); const inp = document.createElement("input");
+  inp.className = "rename"; inp.value = c.title; inp.maxLength = 80; inp.setAttribute("aria-label", "Chat name");
+  span.replaceWith(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = save => { if (done) return; done = true; if (save && inp.value.trim()) { c.title = inp.value.trim(); saveChats(); } renderSide(); };
+  inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); finish(true); } else if (e.key === "Escape") finish(false); };
+  inp.onblur = () => finish(true);
+}
+// Edit a question: everything after it is replaced by the new answer.
+function editTurn(t, qwrap){
+  if (busy) { toast("Wait for the current answer to finish."); return; }
+  const box = document.createElement("div"); box.className = "qedit";
+  box.innerHTML = `<textarea aria-label="Edit your question"></textarea><div class="row"><button data-cancel>Cancel</button><button class="primary" data-save>Save &amp; ask</button></div>`;
+  const ta = box.querySelector("textarea"); ta.value = t.q;
+  qwrap.replaceWith(box); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  ta.style.height = Math.min(ta.scrollHeight + 4, 300) + "px";
+  const cancel = () => box.replaceWith(qwrap);
+  const save = () => {
+    const nq = ta.value.trim(); if (!nq) return;
+    if (busy) { toast("Wait for the current answer to finish."); return; }
+    const c = current(); const i = c.turns.indexOf(t); if (i < 0) return cancel();
+    c.turns = c.turns.slice(0, i);
+    if (i === 0 && c.title === t.q.slice(0, 60)) c.title = nq.slice(0, 60); // keep a name the user chose
+    saveChats(); renderSide(); renderThread(); ask(nq);
+  };
+  box.querySelector("[data-cancel]").onclick = cancel;
+  box.querySelector("[data-save]").onclick = save;
+  ta.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(); } else if (e.key === "Escape") cancel(); };
+}
 function turnEl(t){
   const wrap = document.createElement("div"); wrap.style.display = "contents";
-  const q = document.createElement("div"); q.className = "q"; q.textContent = t.q; wrap.appendChild(q);
+  const qwrap = document.createElement("div"); qwrap.className = "qwrap";
+  const q = document.createElement("div"); q.className = "q"; q.textContent = t.q; qwrap.appendChild(q);
+  const qa = document.createElement("div"); qa.className = "qact";
+  qa.innerHTML = `<button data-qcopy title="Copy question">Copy</button><button data-qedit title="Edit and ask again">Edit</button>`;
+  qa.querySelector("[data-qcopy]").onclick = () => copyText(t.q, "Question copied");
+  qa.querySelector("[data-qedit]").onclick = () => editTurn(t, qwrap);
+  qwrap.appendChild(qa); wrap.appendChild(qwrap);
   const a = document.createElement("div"); a.className = "a"; wrap.appendChild(a);
   t.el = a; paint(t);
   return wrap;
@@ -548,12 +617,13 @@ function paint(t){
       : `<span class="badge ok">Complete: ${total.toLocaleString()} ${total === 1 ? "row" : "rows"}</span>`;
     const tools = tb.rows.length > 8 ? `<input class="tsearch" type="search" placeholder="Search these ${tb.rows.length.toLocaleString()} rows" value="${esc(st.filter || "")}" aria-label="Search the table"><span class="tcount muted"></span>` : "";
     const label = tb.title ? `<span class="ttitle">${list.length > 1 && !/^(part\s*)?\d/i.test(tb.title) ? `${i + 1}. ` : ""}${esc(friendly(tb.title))}</span>` : "Data";
-    h += `<div class="block dblock ${st.expanded ? "expanded" : ""}" data-ti="${i}"><div class="block-h">${label} ${badge}<span class="sp"></span>${tb.rows.length > 12 ? `<button class="link" data-expand>${st.expanded ? "Collapse" : "Expand"}</button>` : ""}<button class="link" data-csv>Download CSV</button></div>
+    h += `<div class="block dblock ${st.expanded ? "expanded" : ""}" data-ti="${i}"><div class="block-h">${label} ${badge}<span class="sp"></span>${tb.rows.length > 12 ? `<button class="link" data-expand>${st.expanded ? "Collapse" : "Expand"}</button>` : ""}<button class="link" data-tcopy title="Copy as a table you can paste into Sheets or Excel">Copy table</button><button class="link" data-csv>Download CSV</button></div>
       ${tools ? `<div class="ttools">${tools}</div>` : ""}<div class="tablewrap">${tableHtml(tb, st)}</div></div>`;
   });
   if (r.sources && r.sources.length) h += `<div class="block"><div class="block-h">Open in Notion</div><div class="chips">${r.sources.map(s => `<a class="chip" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.deal)}${s.status ? `<em>${esc(s.status)}</em>` : ""}</a>`).join("")}</div></div>`;
   if (r.followups && r.followups.length) h += `<div class="follow">${r.followups.map(f => `<button data-q="${esc(f)}">${esc(f)}</button>`).join("")}</div>`;
   h += `<div class="foot"><button class="fb" data-up aria-pressed="${t.rating === 1}" title="Good answer: save it as an example">👍</button><button class="fb" data-down aria-pressed="${t.rating === -1}" title="Something's wrong">👎</button>
+        <button class="act" data-acopy title="Copy the answer text">Copy</button><button class="act" data-aedit title="Edit the question and ask again">Edit question</button>
         <button class="link" data-sql>${t.showSql ? "Hide query" : "Show query"}</button><span class="sp"></span><span>${(r.ms / 1000).toFixed(1)}s · data as of ${esc(fmtDate(r.data_as_of))}</span></div>
         <div class="correct ${t.correcting ? "on" : ""}"><input placeholder="What's wrong or what should it be? (optional)" maxlength="600"><button data-send-corr>Send</button></div>`;
   if (t.showSql) h += `<pre class="sql">${esc((r.sql || []).join("\n\n-- next query --\n\n") || "No database query was needed; answered from search results.")}</pre>`;
@@ -566,8 +636,11 @@ function paint(t){
     const ts = blk.querySelector(".tsearch"); if (ts) { let tm; ts.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { st.filter = ts.value; redrawBody(); }, 120); }; if (st.filter) redrawBody(); }
     wireMore();
     const ex = blk.querySelector("[data-expand]"); if (ex) ex.onclick = () => { st.expanded = !st.expanded; paint(t); };
+    const tc = blk.querySelector("[data-tcopy]"); if (tc) tc.onclick = () => copyText(tsv(tb), `Table copied (${tb.rows.length.toLocaleString()} rows)`);
     const cb = blk.querySelector("[data-csv]"); if (cb) cb.onclick = () => { const b = new Blob([csv(tb)], { type: "text/csv" }); const u = URL.createObjectURL(b); const l = document.createElement("a"); l.href = u; l.download = (tb.title ? tb.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60) : "deal-brain") + ".csv"; l.click(); setTimeout(() => URL.revokeObjectURL(u), 2000); };
   });
+  a.querySelector("[data-acopy]").onclick = () => copyText(plainAnswer(r.answer), "Answer copied");
+  a.querySelector("[data-aedit]").onclick = () => { const qw = a.previousElementSibling; if (qw && qw.classList.contains("qwrap")) { qw.scrollIntoView({ block: "center", behavior: "smooth" }); editTurn(t, qw); } };
   a.querySelector("[data-sql]").onclick = () => { t.showSql = !t.showSql; paint(t); };
   a.querySelector("[data-up]").onclick = () => feedback(t, 1, "");
   a.querySelector("[data-down]").onclick = () => { t.correcting = true; paint(t); a.querySelector(".correct input").focus(); };
@@ -611,6 +684,8 @@ input.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey &&
 $("#form").addEventListener("submit", e => { e.preventDefault(); const q = input.value.trim(); if (!q) return; input.value = ""; input.style.height = "auto"; ask(q); });
 document.addEventListener("click", e => {
   const qb = e.target.closest("[data-q]"); if (qb && !busy) { ask(qb.dataset.q); return; }
+  const rn = e.target.closest("[data-rename]"); if (rn) { e.stopPropagation(); renameChat(rn.dataset.rename); return; }
+  if (e.target.closest("input.rename")) return;
   const del = e.target.closest("[data-del]"); if (del) { e.stopPropagation(); chats = chats.filter(c => c.id !== del.dataset.del); if (currentId === del.dataset.del) currentId = null; saveChats(); renderSide(); renderThread(); return; }
   const it = e.target.closest(".chat-item"); if (it) { currentId = it.dataset.id; saveChats(); renderSide(); renderThread(); $("#side").classList.remove("open"); scrollDown(); return; }
   if (e.target.closest("#side") === null && $("#side").classList.contains("open") && !e.target.closest("#menu")) $("#side").classList.remove("open");
