@@ -78,7 +78,7 @@ async function runSql(sql: string) {
 }
 
 // ---------- AI ----------
-async function chat(provider: string, model: string, messages: any[], tools: any[] | null, effort: string) {
+async function chat(provider: string, model: string, messages: any[], tools: any[] | null, effort: string, deadline = Date.now() + 120_000) {
   const p = PROVIDERS[provider];
   if (!p?.key) { const e: any = new Error(`${provider} key not set`); e.status = 401; throw e; }
   const body: any = { model, messages };
@@ -89,18 +89,25 @@ async function chat(provider: string, model: string, messages: any[], tools: any
   // Busy/overloaded (429, 500, 503) is common on free tiers: retry with backoff before giving up.
   const waits = [1500, 4000, 9000];
   for (let attempt = 0; ; attempt++) {
-    const r = await fetch(p.url, {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${p.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // Each call gets at most 55s and never runs past the request's overall deadline (functions stop at 150s).
+    const left = Math.min(55_000, deadline - Date.now());
+    if (left < 4000) { const e: any = new Error(`[${provider}] out of time`); e.status = 504; throw e; }
+    let r: Response;
+    try {
+      r = await fetch(p.url, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${p.key}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(left),
+      });
+    } catch (e: any) { const err: any = new Error(`[${provider}] ${model} timed out`); err.status = 504; throw err; }
     const raw = await r.json().catch(() => ({}));
     const j: any = Array.isArray(raw) ? raw[0] : raw;
     if (r.ok) return j;
     const msg = String(j?.error?.message || `error ${r.status}`);
     const retryIn = Number((msg.match(/retry in ([\d.]+)s/i) || [])[1] || 0) * 1000;
     const busy = r.status === 503 || r.status === 500 || (r.status === 429 && (retryIn > 0 || !/credit|billing|exceeded your current quota/i.test(msg)));
-    if (busy && attempt < waits.length && retryIn <= 30000) { await new Promise((res) => setTimeout(res, Math.max(waits[attempt], retryIn + 500))); continue; }
+    if (busy && attempt < waits.length && retryIn <= 30000 && Date.now() + Math.max(waits[attempt], retryIn + 500) < deadline - 20_000) { await new Promise((res) => setTimeout(res, Math.max(waits[attempt], retryIn + 500))); continue; }
     const e: any = new Error(`[${provider}] ` + msg); e.status = r.status; e.code = j?.error?.code; throw e;
   }
 }
@@ -109,7 +116,10 @@ const TOOLS = [{
   function: {
     name: "run_sql",
     description: `Run ONE read-only Postgres SELECT (or WITH ... SELECT) on the fund's database. You get row_count and the first 80 rows as JSON; the user sees up to ${MAX_ROWS} rows. brain_search(...) and brain_similar(...) can be used inside the query.`,
-    parameters: { type: "object", properties: { sql: { type: "string" } }, required: ["sql"] },
+    parameters: { type: "object", properties: {
+      sql: { type: "string" },
+      title: { type: "string", description: "Short title for the table this query produces, e.g. 'Missed fintech companies' or 'Who funded them'. Give a title to every query whose result should be shown to the user (one per part of a multi-part question); leave it out for helper queries." },
+    }, required: ["sql"] },
   },
 }];
 
@@ -144,7 +154,44 @@ async function warmQueryEmbedding(q: string) {
              on conflict (q) do update set used_at = now()`;
   } catch (e) { console.error("embed", e); } // falls back to the database path
 }
-async function answer(question: string, history: any[], deep: boolean, settings: any) {
+// Multi-part, "why"/"pattern" or long questions go to a stronger model first (free-tier limits permitting).
+function isComplex(q: string, deep: boolean) {
+  if (deep) return true;
+  const parts = (q.match(/\?/g) || []).length + (q.match(/\b(also|and then|as well as|along with)\b/gi) || []).length;
+  const asks = (q.match(/\b(what|which|who|whom|how|why|where|when|list|show|identify)\b/gi) || []).length; // "which sectors ... and what reasons"
+  return parts >= 2 || asks >= 2 || q.length > 160 || /\b(why|pattern|patterns|compare|comparison|identify|insight|explain|reason)\b/i.test(q);
+}
+const exhausted = new Map<string, number>(); // model -> time when it can be tried again (quota hit)
+function modelChain(settings: any, complex: boolean, override?: string) {
+  const base = settings.gemini_model || "gemini-3.5-flash-lite";
+  if (override) return [override, base];
+  const smart: string[] = Array.isArray(settings.smart_models) ? settings.smart_models : ["gemini-3.5-flash", "gemini-3.7-flash"];
+  const list = complex && settings.smart_routing !== false ? [...smart, base] : [base];
+  return [...new Set(list)].filter((m) => (exhausted.get(m) || 0) < Date.now() || m === base);
+}
+// Names the answer puts in **bold** must exist in the data the AI actually read (query results or search results).
+function unverifiedNames(text: string, haystack: string, question: string) {
+  const out: string[] = [];
+  for (const m of text.matchAll(/\*\*(.+?)\*\*/g)) {
+    const n = m[1].trim();
+    if (n.length < 3 || /\d/.test(n) || /[:?]$/.test(n) || /^(scope|takeaway|corrected|note|part|total|all|none|not set|yes|no)\b/i.test(n)) continue;
+    if (/\b(companies|deals|founders|investors|startups|rounds|teams|sectors|missed|passed|funded|pattern|patterns|why|who|how many)\b/i.test(n) && n.split(" ").length > 2) continue; // headings / phrases
+    const key = n.toLowerCase().replace(/\s*\(.*?\)\s*/g, " ").trim();
+    if (!haystack.includes(key) && !question.toLowerCase().includes(key)) out.push(n);
+  }
+  return [...new Set(out)];
+}
+// Playbooks (public.brain_playbooks): for known question types the right queries are run up front, so every
+// part of a multi-part question has its data even when only the small model is available.
+let playbookCache: { at: number; v: any[] } | null = null;
+async function playbooksFor(q: string) {
+  if (!playbookCache || Date.now() - playbookCache.at > 300_000) {
+    const rows: any = await db`select name, pattern, queries, guide from brain_playbooks where active order by name`.catch(() => []);
+    playbookCache = { at: Date.now(), v: rows };
+  }
+  return playbookCache.v.filter((p: any) => { try { return new RegExp(p.pattern, "is").test(q); } catch { return false; } });
+}
+async function answer(question: string, history: any[], deep: boolean, settings: any, opts: { model?: string } = {}) {
   const [prefetch, pp] = await Promise.all([
     warmQueryEmbedding(question).then(() => db`select public.brain_prefetch(${question}) as c`).then((r: any) => r[0]?.c).catch(() => null),
     promptParts(),
@@ -154,32 +201,74 @@ async function answer(question: string, history: any[], deep: boolean, settings:
     if (h?.q) messages.push({ role: "user", content: String(h.q).slice(0, 1000) });
     if (h?.a) messages.push({ role: "assistant", content: String(h.a).slice(0, 3000) });
   }
-  messages.push({ role: "user", content: question });
+  const complex = isComplex(question, deep);
+  // Multi-part questions: make the model plan the parts first so none gets dropped.
+  messages.push({ role: "user", content: complex ? question + "\n\n(Internal note, not from the user: this question may have several parts. First split it into numbered parts — every question mark, 'also', 'who', 'why', 'where' is a part. Answer EVERY part: one titled run_sql per part, and a bold numbered heading per part in the answer. If the data cannot answer a part, say exactly which data is missing for that part.)" : question });
 
   // Primary provider from settings; on errors switch once to the other provider (if its key is set and fallback is on).
   const order = settings.provider === "openai" ? ["openai", "gemini"] : ["gemini", "openai"];
-  const modelFor = (pv: string) => pv === "gemini" ? (settings.gemini_model || "gemini-2.5-flash") : (settings.model || "gpt-5-mini");
+  const chain = settings.provider === "openai" ? [settings.model || "gpt-5-mini"] : modelChain(settings, complex, opts.model);
+  const modelFor = (pv: string) => pv === "gemini" ? chain[0] : (settings.model || "gpt-5-mini");
   let provider = order.find((pv) => PROVIDERS[pv].key) || order[0];
   let model = modelFor(provider);
+  const maxSteps = complex ? MAX_STEPS + 2 : MAX_STEPS;
+  const tables: any[] = [];
+  let haystack = JSON.stringify(prefetch?.hits || []).toLowerCase() + JSON.stringify(prefetch?.memory || []).toLowerCase();
   const effort = deep ? "medium" : "low";
+  // Overall time budget: stop querying with time left to write the answer.
+  const deadline = Date.now() + 115_000;
   const sqls: string[] = [];
   let last: any = null, tokensIn = 0, tokensOut = 0, text = "";
   let switched = false;
-  for (let step = 0; step < MAX_STEPS; step++) {
+  const trace: any[] = []; // per-step timing, for the owner self-test
+  const fin = /fin ?tech|financial|lending|payments?|insur|wealth|neobank|credit/i.test(question);
+  for (const p of await playbooksFor(question)) {
+    const picked = (p.queries || []).filter((q: any) => !q.when || new RegExp(q.when, "i").test(question));
+    const results = await Promise.all(picked.map((q: any) => {
+      const sql = String((!fin && q.sql_all) || q.sql).replaceAll("{fintech_and}", fin ? "is_fintech and" : "").replaceAll("{segment}", fin ? "Fintech" : "All sectors");
+      return runSql(sql).catch((e) => { console.error("playbook", p.name, q.title, e?.message); return null; });
+    }));
+    const parts: string[] = [];
+    results.forEach((t: any, i: number) => {
+      if (!t) return;
+      const title = String(picked[i].title);
+      sqls.push(t.sql); if (t.rows.length) last = t;
+      haystack += JSON.stringify(t.rows).toLowerCase() + " ";
+      tables.push({ title, columns: t.columns, numeric: t.numeric, rows: t.rows, truncated: t.truncated });
+      parts.push(`Table "${title}": ${toolPayload(t)}`);
+    });
+    if (parts.length) {
+      const m = messages[messages.length - 1];
+      m.content += `\n\n(Internal note, not from the user: these queries were already run for this question and are shown to the user as tables, in this order. Use them; run another query only if a part of the question is still not covered.)\n${parts.join("\n\n")}\n\nHow to answer: ${p.guide}`;
+      trace.push({ playbook: p.name, tables: parts.length });
+    }
+  }
+  for (let step = 0; step < maxSteps; step++) {
     let j: any;
-    const toolsNow = step < MAX_STEPS - 1 ? TOOLS : null; // last step must answer
-    try { j = await chat(provider, model, messages, toolsNow, effort); }
-    catch (e: any) {
+    const toolsNow = step < maxSteps - 1 && Date.now() < deadline - 45_000 ? TOOLS : null; // last step (or low on time) must answer
+    // Stronger model hit its free quota (or isn't available): fall down the chain to the next one.
+    while (true) {
+      try { j = await chat(provider, model, messages, toolsNow, effort, deadline); break; }
+      catch (e: any) {
+        const idx = chain.indexOf(model);
+        if (provider === "gemini" && idx >= 0 && idx < chain.length - 1 && [429, 404, 400, 403, 500, 503, 504].includes(Number(e.status))) {
+          exhausted.set(model, Date.now() + (Number(e.status) === 429 ? 30 : 2) * 60_000); model = chain[idx + 1]; continue; // quota: 30 min; busy or slow: 2 min
+        }
+        j = { __err: e }; break;
+      }
+    }
+    if (j && j.__err) { const e = j.__err; j = undefined;
       const other = settings.fallback === false ? undefined : order.find((pv) => pv !== provider && PROVIDERS[pv].key);
       if (!switched && other) {
         switched = true; const firstErr = e.message; provider = other; model = modelFor(other);
-        try { j = await chat(provider, model, messages, toolsNow, effort); }
+        try { j = await chat(provider, model, messages, toolsNow, effort, deadline); }
         catch (e2: any) { const err: any = new Error(firstErr + " || then " + e2.message); err.status = e2.status; throw err; }
       } else throw e;
     }
     tokensIn += j.usage?.prompt_tokens || 0; tokensOut += j.usage?.completion_tokens || 0;
     const msg = j.choices?.[0]?.message || {};
     const calls = msg.tool_calls || [];
+    trace.push({ step, model, at: Date.now() - (deadline - 115_000), calls: calls.length });
     if (!calls.length) { text = msg.content || ""; break; }
     messages.push({ role: "assistant", content: msg.content || null, tool_calls: calls });
     for (const c of calls) {
@@ -189,6 +278,16 @@ async function answer(question: string, history: any[], deep: boolean, settings:
         const t = await runSql(args.sql);
         sqls.push(t.sql);
         if (t.rows.length) last = t; else if (!last) last = t;
+        haystack += JSON.stringify(t.rows).toLowerCase() + " ";
+        if (args.title) {
+          const title = String(args.title).slice(0, 120);
+          const at = tables.findIndex((x) => x.title === title);
+          const entry = { title, columns: t.columns, numeric: t.numeric, rows: t.rows, truncated: t.truncated };
+          // Same rows as a table already shown (e.g. a playbook table re-queried)? Don't show it twice.
+          const firstCol = (x: any) => JSON.stringify(x.rows.map((r: any[]) => r[0]));
+          const dup = tables.some((x) => x.title !== title && x.rows.length === t.rows.length && firstCol(x) === firstCol(entry));
+          if (at >= 0) tables[at] = entry; else if (!dup) tables.push(entry);
+        }
         content = toolPayload(t);
       } catch (e: any) {
         content = JSON.stringify({ error: String(e.message || e).slice(0, 500) });
@@ -200,17 +299,49 @@ async function answer(question: string, history: any[], deep: boolean, settings:
   if (!text.trim()) {
     messages.push({ role: "user", content: "Write the final answer now from the query results above, in the required answer format. Do not call any tools." });
     try {
-      const j = await chat(provider, model, messages, null, effort);
+      const j = await chat(provider, model, messages, null, effort, deadline + 20_000);
       tokensIn += j.usage?.prompt_tokens || 0; tokensOut += j.usage?.completion_tokens || 0;
       text = j.choices?.[0]?.message?.content || "";
     } catch (_) { /* fall through to the generic message */ }
   }
-  // follow-ups line
+  // Completeness check: the answer must not claim a part can't be answered when a table for it was retrieved.
+  const shown = tables.filter((t) => t.rows.length);
+  if (text && shown.length && /(does not|doesn't|do not|cannot|can't) (provide|contain|have|include|show|explain|answer)|not available in|no (data|information) (is |was )?(available|recorded)/i.test(text)) {
+    const brief = shown.map((t) => `"${t.title}" (${t.rows.length} rows): ` + JSON.stringify({ columns: t.columns, rows: t.rows.slice(0, 12) }).slice(0, 3000)).join("\n");
+    messages.push({ role: "assistant", content: text });
+    messages.push({ role: "user", content: `Your answer says some part can't be answered, but these tables were retrieved for it:\n${brief}\nRewrite the whole answer so EVERY part uses these tables with concrete numbers (for a "why/pattern" part, compare the groups row by row, e.g. "Series A share 22% vs 11%"). Only say data is missing if no table covers that part. Keep the same format. Do not call any tools.` });
+    try {
+      const j = await chat(provider, model, messages, null, effort, deadline + 20_000);
+      tokensIn += j.usage?.prompt_tokens || 0; tokensOut += j.usage?.completion_tokens || 0;
+      const t2 = j.choices?.[0]?.message?.content || "";
+      if (t2.trim()) text = t2;
+    } catch (_) { /* keep the first answer */ }
+  }
+  // Follow-up suggestions line (taken out before any note is appended below).
   let followups: string[] = [];
-  const m = text.match(/\n?\s*FOLLOWUPS:\s*(.+)\s*$/i);
-  if (m) { followups = m[1].split("|").map((x) => x.trim()).filter(Boolean).slice(0, 3); text = text.slice(0, m.index).trim(); }
+  const fm = text.match(/\n?[ \t]*FOLLOWUPS:[ \t]*(.+)/i);
+  if (fm) { followups = fm[1].split("|").map((x) => x.trim()).filter(Boolean).slice(0, 3); text = (text.slice(0, fm.index) + text.slice((fm.index || 0) + fm[0].length)).trim(); }
+  // Grounding check: anything named in bold must come from the data. One rewrite, then remove what still doesn't check out.
+  let bad = text ? unverifiedNames(text, haystack, question) : [];
+  if (bad.length) {
+    messages.push({ role: "assistant", content: text });
+    messages.push({ role: "user", content: `These names in your answer do not appear in any query result or search result: ${bad.join(", ")}. Every company, investor and person you name must come from the data you retrieved — never from general knowledge. Rewrite the whole answer using only the retrieved data. If the data does not answer a part of the question, say so plainly for that part. Do not call any tools.` });
+    try {
+      const j = await chat(provider, model, messages, null, effort, deadline + 20_000);
+      tokensIn += j.usage?.prompt_tokens || 0; tokensOut += j.usage?.completion_tokens || 0;
+      const t2 = j.choices?.[0]?.message?.content || "";
+      if (t2.trim()) text = t2;
+    } catch (_) { /* keep the first answer, filtered below */ }
+    bad = unverifiedNames(text, haystack, question);
+    if (bad.length) {
+      trace.push({ removed: bad });
+      const lines = text.split("\n").filter((l) => !bad.some((b) => l.includes(b)));
+      text = lines.join("\n") + `\n\nNote: ${bad.length} item${bad.length > 1 ? "s" : ""} could not be verified against the data and ${bad.length > 1 ? "were" : "was"} removed.`;
+    }
+  }
+  text = text.replace(/\n?[ \t]*FOLLOWUPS:.*$/gim, "").trim(); // a rewrite may repeat the suggestions line
   if (!text) text = "I couldn't finish this one. Try asking more specifically.";
-  return { text, followups, table: last, sqls, model: provider + ":" + model, tokensIn, tokensOut };
+  return { text, followups, table: last, tables: tables.length ? tables : null, sqls, model: provider + ":" + model, tokensIn, tokensOut, complex, verified: !bad.length, trace };
 }
 
 async function sourcesFor(text: string, table: any) {
@@ -434,8 +565,22 @@ Deno.serve(async (req: Request) => {
       if (!sec || req.headers.get("x-brain-secret") !== sec.value) return json({ error: "forbidden" }, 403);
       if (body.ask_test) {
         // Owner-only end-to-end check of the answer pipeline (not logged, no quota).
-        const out = await answer(String(body.ask_test), body.history || [], !!body.deep, await settings(true));
-        return json({ text: out.text, sqls: out.sqls, columns: out.table?.columns, rows: out.table?.rows?.slice(0, 40), row_count: out.table?.rows?.length, model: out.model, tokensIn: out.tokensIn });
+        const t0 = Date.now();
+        const run = async () => {
+          const out = await answer(String(body.ask_test), body.history || [], !!body.deep, await settings(true), { model: body.model });
+          return { ms: Date.now() - t0, text: out.text, sqls: out.sqls, columns: out.table?.columns, rows: out.table?.rows?.slice(0, 40), row_count: out.table?.rows?.length,
+          tables: (out.tables || []).map((t: any) => ({ title: t.title, columns: t.columns, row_count: t.rows.length, first: t.rows.slice(0, 3) })), model: out.model, complex: out.complex, verified: out.verified, tokensIn: out.tokensIn, trace: out.trace };
+        };
+        if (body.run_id) {
+          // Long tests run in the background and write their result to selftest_runs (SQL callers time out at ~60s).
+          const id = Number(body.run_id);
+          const job = run().then((r) => db`update selftest_runs set status = 'done', http_status = 200, result = ${db.json(r)}, finished_at = now() where id = ${id}`)
+            .catch((e) => db`update selftest_runs set status = 'error', result = ${db.json({ error: String(e?.message || e) })}, finished_at = now() where id = ${id}`);
+          // @ts-ignore EdgeRuntime is provided by Supabase
+          EdgeRuntime.waitUntil(job);
+          return json({ queued: id });
+        }
+        return json(await run());
       }
       if (body.timing) {
         const t: any = {}; let t0 = Date.now();
@@ -525,6 +670,7 @@ Deno.serve(async (req: Request) => {
     return json({
       log_id: log.id, answer: out.text, followups: out.followups, sources,
       table: out.table ? { columns: out.table.columns, numeric: out.table.numeric, rows: out.table.rows, truncated: out.table.truncated } : null,
+      tables: out.tables,
       sql: out.sqls, ms, model: out.model, data_as_of: m.data_as_of,
       quota: { ...quota, used: quota.used + 1 },
     });

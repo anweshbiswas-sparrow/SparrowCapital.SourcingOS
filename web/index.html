@@ -96,7 +96,23 @@ a{color:var(--accent)}
 .chart .lbl{fill:var(--ink)}
 .legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-bottom:6px;flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
-.tablewrap{overflow:auto;max-height:340px;border:1px solid var(--line);border-radius:10px}
+.tablewrap{overflow:auto;max-height:420px;border:1px solid var(--line);border-radius:10px}
+.dblock.expanded .tablewrap{max-height:78vh}
+.tablewrap table{width:max-content;min-width:100%}
+.tablewrap td{min-width:64px;max-width:360px;white-space:normal}
+.tablewrap td:not(.n):not(.rn){min-width:140px}
+.dblock .block-h{flex-wrap:wrap;row-gap:6px}
+.block-h .ttitle{text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink,var(--text));font-weight:650}
+.badge{display:inline-block;margin-left:8px;border-radius:999px;padding:2px 9px;font-size:11px;letter-spacing:0;text-transform:none;font-weight:600;background:var(--soft);color:var(--muted)}
+.badge.ok{background:var(--accent-soft);color:var(--accent)}
+.badge.warn{background:var(--warn-soft);color:var(--warn)}
+.ttools{display:flex;align-items:center;gap:10px;margin:0 0 8px}
+.tsearch{flex:1;min-width:0;max-width:340px;border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 10px;font-size:13px}
+.tsearch:focus{outline:2px solid var(--accent);outline-offset:-1px}
+td.rn,th.rn{color:var(--faint);text-align:right;width:1%;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.more{text-align:center;padding:10px}
+details.long summary{cursor:pointer;list-style:none}
+details.long summary::-webkit-details-marker{display:none}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;max-width:420px}
 th{position:sticky;top:0;background:var(--soft);font-weight:600;cursor:pointer;white-space:nowrap;user-select:none}
@@ -346,8 +362,9 @@ function toast(t){ const el = $("#toast"); el.textContent = t; el.classList.add(
 function fmtDate(iso){ if (!iso) return "—"; const d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) + ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
 function fmtNum(v){ if (typeof v !== "number") return esc(v ?? ""); return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
 // Saved chats keep at most 300 table rows per answer so long lists don't fill the browser's storage.
+const trimTable = tb => tb && tb.rows && tb.rows.length > 300 ? { ...tb, rows: tb.rows.slice(0, 300), trimmed: tb.trimmed || tb.rows.length } : tb;
 function saveChats(){
-  const slim = chats.slice(0, 40).map(c => ({ ...c, turns: c.turns.map(t => t.res?.table?.rows?.length > 300 ? { ...t, el: null, res: { ...t.res, table: { ...t.res.table, rows: t.res.table.rows.slice(0, 300), trimmed: t.res.table.rows.length } } } : { ...t, el: null }) }));
+  const slim = chats.slice(0, 40).map(c => ({ ...c, turns: c.turns.map(t => t.res ? { ...t, el: null, res: { ...t.res, table: trimTable(t.res.table), tables: t.res.tables ? t.res.tables.map(trimTable) : t.res.tables } } : { ...t, el: null }) }));
   store.set(chatKey, slim); store.set(curKey, currentId);
 }
 const current = () => chats.find(c => c.id === currentId);
@@ -378,7 +395,16 @@ async function call(body){
 }
 
 // ---- Markdown-lite for answers ----
+// Safety net: internal table names should never reach the reader.
+const FRIENDLY = { v_raw_data: "Raw Data", v_raw_data_content: "Raw Data", v_previous_company_list: "Raw Data (Previous Company Worked At)", v_f3_company_breakup: "Notion F3 Classification Company Breakup",
+  nt_f3_company_breakup: "Notion F3 Classification Company Breakup", v_founder_employers: "founder career data", nt_deal_pipeline: "Deal Pipeline", v_deal_content: "deal pages",
+  v_tracxn_fund: "Tracxn Fund", nt_tracxn_rounds: "Tracxn Fund", v_tracxn_companies: "Tracxn Fund", v_tracxn_missed_pattern: "Tracxn Fund (missed vs seen)", v_tracxn_missed_investors: "Tracxn Fund (investors)", tracxn_founders: "Tracxn founder data", v_local_snapshot: "Local Snapshot", nt_local_snapshot: "Local Snapshot", v_sector_wise_f3: "Sector Wise – F3",
+  v_investor_missing_deals: "Investor Missing Deals", v_out_of_coverage_deals: "Out of Coverage Deals", v_f3_sector_super_master: "F3 Sector Super Master", v_startup_universe: "all Notion views" };
+function friendly(text){ return String(text || "").replace(/`?\b((?:v|nt|mv)_[a-z0-9_]+)\b`?/g, (m, k) => FRIENDLY[k] || "the pipeline data"); }
 function md(text){
+  text = friendly(text);
+  // A takeaway without a number is filler; leave it out.
+  text = text.split("\n").filter(l => !(/^\s*Takeaway:/i.test(l) && !/\d/.test(l))).join("\n");
   const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   let html = "", inList = false;
@@ -440,21 +466,41 @@ function chartFor(t, width){
   return legend + `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Bar chart">${g}</svg>`;
 }
 
-function tableHtml(t, sortCol, sortDir){
-  let rows = t.rows.map((r, i) => ({ r, i }));
-  if (sortCol != null) rows.sort((a, b) => { const x = a.r[sortCol], y = b.r[sortCol]; if (x == null) return 1; if (y == null) return -1; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * sortDir; });
-  const head = t.columns.map((c, i) => `<th class="${t.numeric[i] ? "n" : ""}" data-col="${i}">${esc(c.replace(/_/g, " "))}${sortCol === i ? (sortDir > 0 ? " ↑" : " ↓") : ""}</th>`).join("");
-  const body = rows.map(({ r }) => "<tr>" + r.map((v, i) => {
-    if (t.numeric[i]) return `<td class="n">${fmtNum(v)}</td>`;
-    const s = String(v ?? "");
-    if (/^https?:\/\//.test(s)) return `<td><a href="${esc(s)}" target="_blank" rel="noopener">Open</a></td>`;
-    return `<td><div class="clip" title="${esc(s.slice(0, 600))}">${esc(s)}</div></td>`;
-  }).join("") + "</tr>").join("");
-  return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+// Column names arrive either as "Readable names" (preferred) or snake_case; show them readably.
+const COL_NAMES = { deals: "Deals", founders: "Founders", founding_teams: "Founding teams", pass_stages: "Pass stages", company: "Company", deal: "Deal", startup: "Startup",
+  stage_first_call: "First Call", stage_multiple_calls: "Multiple Calls", stage_deck_scan: "Deck Scan", stage_first_call_data: "First Call + Data", stage_diligence_or_later: "Diligence or later", stage_not_set: "Stage not set",
+  to_be_passed: "To be Passed", passed: "Passed", f3_split: "F3 split", meeting_date: "Meeting date", created_date: "Created", pass_reason: "Pass reason", pass_type: "Pass type", sector: "Sector" };
+function colName(c){ const k = String(c); if (COL_NAMES[k.toLowerCase()]) return COL_NAMES[k.toLowerCase()]; if (/[A-Z ]/.test(k)) return k; const t = k.replace(/_/g, " "); return t.charAt(0).toUpperCase() + t.slice(1); }
+const RENDER_CAP = 3000; // rows drawn at once; search always covers every row
+// st = per-table view state (filter, sort, showAll, expanded); tb = the table itself.
+function viewRows(tb, st){
+  let rows = tb.rows.map((r, i) => ({ r, i }));
+  const q = (st.filter || "").trim().toLowerCase();
+  if (q) rows = rows.filter(({ r }) => r.some(v => v != null && String(v).toLowerCase().includes(q)));
+  if (st.sortCol != null) { const c = st.sortCol, d = st.sortDir || 1; rows.sort((a, b) => { const x = a.r[c], y = b.r[c]; if (x == null) return 1; if (y == null) return -1; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * d; }); }
+  return rows;
+}
+function cellHtml(v, numeric){
+  if (numeric) return `<td class="n">${fmtNum(v)}</td>`;
+  const s = String(v ?? "");
+  if (/^https?:\/\//.test(s)) return `<td><a href="${esc(s)}" target="_blank" rel="noopener">Open</a></td>`;
+  if (s.length > 180) return `<td><details class="long"><summary>${esc(s.slice(0, 160))}…</summary>${esc(s)}</details></td>`;
+  return `<td>${esc(s)}</td>`;
+}
+function tbodyHtml(tb, st){
+  const rows = viewRows(tb, st), cap = st.showAll ? rows.length : Math.min(rows.length, RENDER_CAP);
+  const body = rows.slice(0, cap).map(({ r }, n) => `<tr><td class="rn">${n + 1}</td>${r.map((v, i) => cellHtml(v, tb.numeric[i])).join("")}</tr>`).join("");
+  const more = rows.length > cap ? `<tr><td colspan="${tb.columns.length + 1}" class="more"><button class="link" data-showall>Show all ${rows.length.toLocaleString()} rows</button></td></tr>` : "";
+  const empty = !rows.length ? `<tr><td colspan="${tb.columns.length + 1}" class="muted">No rows match “${esc(st.filter)}”.</td></tr>` : "";
+  return { html: body + more + empty, shown: rows.length };
+}
+function tableHtml(tb, st){
+  const head = `<th class="rn">#</th>` + tb.columns.map((c, i) => `<th class="${tb.numeric[i] ? "n" : ""}" data-col="${i}" title="Sort">${esc(colName(c))}${st.sortCol === i ? ((st.sortDir || 1) > 0 ? " ↑" : " ↓") : ""}</th>`).join("");
+  return `<table><thead><tr>${head}</tr></thead><tbody>${tbodyHtml(tb, st).html}</tbody></table>`;
 }
 function csv(t){
   const q = v => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  return [t.columns.map(q).join(","), ...t.rows.map(r => r.map(q).join(","))].join("\n");
+  return [t.columns.map(c => q(colName(c))).join(","), ...t.rows.map(r => r.map(q).join(","))].join("\n");
 }
 
 // ---- Rendering ----
@@ -486,12 +532,25 @@ function paint(t){
   if (t.error) { a.innerHTML = `<div class="err">${esc(t.error)}</div><div class="foot"><button class="fb" data-retry>Try again</button></div>`; a.querySelector("[data-retry]").onclick = () => retry(t); return; }
   const r = t.res;
   let h = `<div class="answer">${md(r.answer)}</div>`;
-  const tb = r.table;
-  const chart = chartFor(tb, a.clientWidth - 38);
-  if (chart) h += `<div class="block chart"><div class="block-h">Chart</div>${chart}</div>`;
-  if (tb && tb.rows && tb.rows.length) {
-    h += `<div class="block"><div class="block-h">Data · ${(tb.trimmed || tb.rows.length).toLocaleString()}${tb.truncated ? "+" : ""} rows${tb.trimmed ? ` (first ${tb.rows.length} kept in this saved chat)` : ""}<span class="sp"></span><button class="link" data-csv>Download CSV</button></div><div class="tablewrap">${tableHtml(tb, t.sortCol, t.sortDir || 1)}</div></div>`;
-  }
+  // One data block per titled table (multi-part questions); otherwise the single result table.
+  let list = (r.tables && r.tables.length ? r.tables : (r.table ? [r.table] : [])).filter(x => x && x.rows && x.rows.length);
+  // With several tables, single-number helper results (e.g. a total) are already in the text; don't show them as tables.
+  if (list.length > 1) { const big = list.filter(x => !(x.rows.length === 1 && x.columns.length <= 2)); if (big.length) list = big; }
+  t.tstate = t.tstate || [];
+  const states = list.map((_, i) => (list.length === 1 && !r.tables?.length) ? t : (t.tstate[i] = t.tstate[i] || {}));
+  const chartSrc = list.find(x => chartFor(x, 400));
+  const chart = chartSrc ? chartFor(chartSrc, (a.clientWidth || $("#thread").clientWidth || 760) - 38) : "";
+  if (chart) h += `<div class="block chart"><div class="block-h">Chart${chartSrc.title ? ` · ${esc(chartSrc.title)}` : ""}</div>${chart}</div>`;
+  list.forEach((tb, i) => {
+    const st = states[i], total = tb.trimmed || tb.rows.length;
+    const badge = tb.truncated ? `<span class="badge warn">First ${total.toLocaleString()} rows — ask a narrower question for the rest</span>`
+      : tb.trimmed ? `<span class="badge">Complete: ${total.toLocaleString()} rows · first ${tb.rows.length} kept in this saved chat</span>`
+      : `<span class="badge ok">Complete: ${total.toLocaleString()} ${total === 1 ? "row" : "rows"}</span>`;
+    const tools = tb.rows.length > 8 ? `<input class="tsearch" type="search" placeholder="Search these ${tb.rows.length.toLocaleString()} rows" value="${esc(st.filter || "")}" aria-label="Search the table"><span class="tcount muted"></span>` : "";
+    const label = tb.title ? `<span class="ttitle">${list.length > 1 && !/^(part\s*)?\d/i.test(tb.title) ? `${i + 1}. ` : ""}${esc(friendly(tb.title))}</span>` : "Data";
+    h += `<div class="block dblock ${st.expanded ? "expanded" : ""}" data-ti="${i}"><div class="block-h">${label} ${badge}<span class="sp"></span>${tb.rows.length > 12 ? `<button class="link" data-expand>${st.expanded ? "Collapse" : "Expand"}</button>` : ""}<button class="link" data-csv>Download CSV</button></div>
+      ${tools ? `<div class="ttools">${tools}</div>` : ""}<div class="tablewrap">${tableHtml(tb, st)}</div></div>`;
+  });
   if (r.sources && r.sources.length) h += `<div class="block"><div class="block-h">Open in Notion</div><div class="chips">${r.sources.map(s => `<a class="chip" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.deal)}${s.status ? `<em>${esc(s.status)}</em>` : ""}</a>`).join("")}</div></div>`;
   if (r.followups && r.followups.length) h += `<div class="follow">${r.followups.map(f => `<button data-q="${esc(f)}">${esc(f)}</button>`).join("")}</div>`;
   h += `<div class="foot"><button class="fb" data-up aria-pressed="${t.rating === 1}" title="Good answer: save it as an example">👍</button><button class="fb" data-down aria-pressed="${t.rating === -1}" title="Something's wrong">👎</button>
@@ -499,8 +558,16 @@ function paint(t){
         <div class="correct ${t.correcting ? "on" : ""}"><input placeholder="What's wrong or what should it be? (optional)" maxlength="600"><button data-send-corr>Send</button></div>`;
   if (t.showSql) h += `<pre class="sql">${esc((r.sql || []).join("\n\n-- next query --\n\n") || "No database query was needed; answered from search results.")}</pre>`;
   a.innerHTML = h;
-  a.querySelectorAll("th[data-col]").forEach(th => th.onclick = () => { const c = Number(th.dataset.col); t.sortDir = t.sortCol === c ? -(t.sortDir || 1) : (tb.numeric[c] ? -1 : 1); t.sortCol = c; paint(t); });
-  const csvBtn = a.querySelector("[data-csv]"); if (csvBtn) csvBtn.onclick = () => { const b = new Blob([csv(tb)], { type: "text/csv" }); const u = URL.createObjectURL(b); const l = document.createElement("a"); l.href = u; l.download = "deal-brain.csv"; l.click(); setTimeout(() => URL.revokeObjectURL(u), 2000); };
+  a.querySelectorAll(".dblock").forEach(blk => {
+    const i = Number(blk.dataset.ti), tb = list[i], st = states[i];
+    blk.querySelectorAll("th[data-col]").forEach(th => th.onclick = () => { const c = Number(th.dataset.col); st.sortDir = st.sortCol === c ? -(st.sortDir || 1) : (tb.numeric[c] ? -1 : 1); st.sortCol = c; paint(t); });
+    const wireMore = () => { const m = blk.querySelector("[data-showall]"); if (m) m.onclick = () => { st.showAll = true; redrawBody(); }; };
+    const redrawBody = () => { const { html, shown } = tbodyHtml(tb, st); blk.querySelector("tbody").innerHTML = html; const tc = blk.querySelector(".tcount"); if (tc) tc.textContent = st.filter ? `${shown.toLocaleString()} of ${tb.rows.length.toLocaleString()} rows` : ""; wireMore(); };
+    const ts = blk.querySelector(".tsearch"); if (ts) { let tm; ts.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { st.filter = ts.value; redrawBody(); }, 120); }; if (st.filter) redrawBody(); }
+    wireMore();
+    const ex = blk.querySelector("[data-expand]"); if (ex) ex.onclick = () => { st.expanded = !st.expanded; paint(t); };
+    const cb = blk.querySelector("[data-csv]"); if (cb) cb.onclick = () => { const b = new Blob([csv(tb)], { type: "text/csv" }); const u = URL.createObjectURL(b); const l = document.createElement("a"); l.href = u; l.download = (tb.title ? tb.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60) : "deal-brain") + ".csv"; l.click(); setTimeout(() => URL.revokeObjectURL(u), 2000); };
+  });
   a.querySelector("[data-sql]").onclick = () => { t.showSql = !t.showSql; paint(t); };
   a.querySelector("[data-up]").onclick = () => feedback(t, 1, "");
   a.querySelector("[data-down]").onclick = () => { t.correcting = true; paint(t); a.querySelector(".correct input").focus(); };
