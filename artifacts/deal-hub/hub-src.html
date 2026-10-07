@@ -1,0 +1,663 @@
+<title>Deal Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one-screen shell — a top bar with four tabs; Deal Brain and Notion Sync run full-bleed below it, Settings and Edit data are scrolling panes. */
+:root{
+  --bg:#f4f5f2; --panel:#eceee9; --surface:#ffffff; --ink:#18201d; --muted:#5d6a64; --line:#dde2dd;
+  --accent:#1f6f5c; --accent-ink:#ffffff; --accent-soft:#e3efe9; --ok:#1f7a45; --warn:#9a5b00; --bad:#a3322a; --code:#eef1ed;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#121715; --panel:#0d1210; --surface:#1a211e; --ink:#e6ebe8; --muted:#9aa6a0; --line:#2a3430;
+  --accent:#5cc4a5; --accent-ink:#0d1714; --accent-soft:#1c2e28; --ok:#6fd49a; --warn:#e0a54a; --bad:#ef7d72; --code:#1f2825; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#121715; --panel:#0d1210; --surface:#1a211e; --ink:#e6ebe8; --muted:#9aa6a0; --line:#2a3430;
+  --accent:#5cc4a5; --accent-ink:#0d1714; --accent-soft:#1c2e28; --ok:#6fd49a; --warn:#e0a54a; --bad:#ef7d72; --code:#1f2825; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55;display:flex;flex-direction:column;overflow:hidden}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+[hidden]{display:none!important}
+
+/* ---- Top bar ---- */
+.bar{flex:none;display:flex;align-items:center;gap:14px;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);min-width:0}
+.brand{display:flex;align-items:center;gap:9px;flex:none}
+.logo{width:26px;height:26px;border-radius:7px;background:var(--accent);display:grid;place-items:center}
+.logo svg{width:16px;height:16px;stroke:var(--accent-ink);fill:none;stroke-width:1.8}
+.brand b{font-family:var(--f-display);font-weight:700;font-size:18px;letter-spacing:-.01em}
+.tabs{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;min-width:0;flex:1}
+.tabs::-webkit-scrollbar{display:none}
+.tab{border:0;background:none;padding:7px 12px;border-radius:8px;font-size:14px;font-weight:500;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:7px}
+.tab:hover{color:var(--ink);background:color-mix(in srgb,var(--ink) 5%,transparent)}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.tab .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion: reduce){.tab .dot{animation:none}}
+.health{flex:none;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.health b{font-weight:600;color:var(--ink)}
+@media (max-width:760px){.health{display:none}.brand b{display:none}}
+
+/* ---- Panes ---- */
+.stage{flex:1;min-height:0;position:relative}
+.pane{position:absolute;inset:0}
+.pane iframe{width:100%;height:100%;border:0;display:block;background:var(--bg)}
+.pane.scroll{overflow:auto}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:16px;padding-block:24px 64px;display:flex;flex-direction:column;gap:22px}
+h1{font-family:var(--f-display);font-size:28px;line-height:1.1;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-family:var(--f-display);font-size:19px;margin:0;letter-spacing:-.005em}
+.lead{color:var(--muted);margin:6px 0 0;max-width:70ch}
+.sec{display:flex;flex-direction:column;gap:12px}
+.sechead{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px}
+.note{font-size:13px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--code)}
+th:first-child{border-top-left-radius:11px}th:last-child{border-top-right-radius:11px}
+tr:last-child td{border-bottom:0}
+td.c,th.c{text-align:center}
+.small{font-size:12px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--code);color:var(--muted);white-space:nowrap}
+.pill.ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
+.pill.acc{background:var(--accent-soft);color:var(--accent)}
+.banner{border:1px solid var(--line);border-left:3px solid var(--warn);background:var(--surface);border-radius:10px;padding:10px 14px;font-size:14px}
+.banner ol{margin:6px 0 0;padding-left:20px}
+code{font-family:var(--f-mono);font-size:12px;background:var(--code);padding:1px 5px;border-radius:4px}
+
+/* switches */
+.sw{position:relative;display:inline-block;width:36px;height:20px;vertical-align:middle}
+.sw input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer}
+.sw span{position:absolute;inset:0;border-radius:99px;background:var(--line);transition:background .15s;pointer-events:none}
+.sw span::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+.sw input:checked+span{background:var(--accent)}
+.sw input:checked+span::after{transform:translateX(16px)}
+.sw input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+
+/* buttons and fields */
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:9px;padding:7px 14px;font-size:14px}
+.btn:hover{border-color:color-mix(in srgb,var(--ink) 25%,var(--line))}
+.btn.pri{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.btn.danger{color:var(--bad)}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.field .help{font-size:12px;color:var(--muted)}
+input[type=text],input[type=search],input[type=number],input[type=url],select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:14px;width:100%;min-width:0}
+textarea{resize:vertical;min-height:72px;line-height:1.45}
+input[type=number]{width:90px}
+
+/* lists */
+.items{display:flex;flex-direction:column}
+.item{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item.off .tx{opacity:.55}
+.item .tx{min-width:0;font-size:14px}
+.item .meta{font-size:12px;color:var(--muted);margin-top:2px}
+.item .ops{display:flex;gap:6px;flex:none}
+.item .ops .btn{padding:4px 10px;font-size:13px}
+.empty{padding:16px 14px;color:var(--muted);font-size:14px}
+.addrule{display:flex;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+
+/* data editor */
+.seg{display:inline-flex;align-self:flex-start;background:var(--code);border-radius:10px;padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:6px 14px;border-radius:8px;font-size:14px;font-weight:500;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.split{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:16px;align-items:start}
+@media (max-width:820px){.split{grid-template-columns:minmax(0,1fr)}}
+.results{max-height:62vh;overflow:auto}
+.res{display:block;width:100%;text-align:left;border:0;background:none;padding:10px 14px;border-bottom:1px solid var(--line)}
+.res:last-child{border-bottom:0}
+.res:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.res[aria-current="true"]{background:var(--accent-soft)}
+.res b{font-weight:600}
+.res .meta{font-size:12px;color:var(--muted);margin-top:1px;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.editor{padding:16px;display:flex;flex-direction:column;gap:14px}
+.editor .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media (max-width:520px){.editor .grid2{grid-template-columns:minmax(0,1fr)}}
+.editor h3{margin:0;font-family:var(--f-display);font-size:20px;letter-spacing:-.005em}
+.editor a{color:var(--accent)}
+.listhead{padding:8px 14px;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--code)}
+.listhead:first-child{border-top-left-radius:11px;border-top-right-radius:11px}
+.links{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.links a{display:block;padding:14px 16px;color:inherit;text-decoration:none}
+.links a:hover{border-color:var(--accent)}
+.links a b{display:block;font-weight:600}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:10px;font-size:14px;z-index:9;max-width:calc(100% - 32px)}
+.toast.err{background:var(--bad);color:#fff}
+</style>
+
+<header class="bar">
+  <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="17" r="2.2"/><path d="M8 7.6l8-1.2M7.2 8.8l3.8 6.4M17 8l-3.8 7"/></svg></span><b>Deal Hub</b></div>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" id="t-brain" data-pane="brain" aria-selected="true" type="button">Deal Brain</button>
+    <button class="tab" role="tab" id="t-sync" data-pane="sync" aria-selected="false" type="button">Notion Sync<span class="dot" id="syncDot" hidden></span></button>
+    <button class="tab" role="tab" id="t-settings" data-pane="settings" aria-selected="false" type="button">Settings</button>
+    <button class="tab" role="tab" id="t-data" data-pane="data" aria-selected="false" type="button">Edit data</button>
+  </nav>
+  <div class="health" id="health">Loading status…</div>
+</header>
+
+<div class="stage">
+  <section class="pane" id="p-brain" role="tabpanel" aria-labelledby="t-brain"></section>
+  <section class="pane" id="p-sync" role="tabpanel" aria-labelledby="t-sync" hidden></section>
+
+  <section class="pane scroll" id="p-settings" role="tabpanel" aria-labelledby="t-settings" hidden>
+    <div class="wrap">
+      <header>
+        <h1>Settings</h1>
+        <p class="lead">How Notion Sync copies data and what Deal Brain remembers. Everything here is saved in Supabase, so it applies to everyone using these pages and to the nightly job.</p>
+      </header>
+      <div class="banner" id="setBanner" hidden></div>
+
+      <div class="sec">
+        <div class="sechead"><h2>Notion Sync</h2><span class="note">Nightly run starts 2:00 AM IST</span></div>
+        <div class="banner" id="nightlyWarn" hidden></div>
+        <div class="card tablewrap">
+          <table>
+            <thead><tr><th>Source</th><th class="c">In “Sync all”</th><th class="c">Nightly</th><th>Last good sync</th><th>Last nightly run</th></tr></thead>
+            <tbody id="srcRows"><tr><td colspan="5" class="small">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="row">
+          <div class="field" style="flex-direction:row;align-items:center;gap:10px">
+            <label for="days" style="text-transform:none;letter-spacing:0;font-size:14px;font-weight:500;color:var(--ink)">Re-read deal pages created or met in the last</label>
+            <input type="number" id="days" min="1" max="365" value="45"><span class="note">days</span>
+          </div>
+        </div>
+        <div class="row"><button class="btn pri" id="saveSync" type="button" disabled>Save sync settings</button><span class="note" id="syncSaved"></span></div>
+      </div>
+
+      <div class="sec">
+        <div class="sechead"><h2>Semantic memory</h2><span class="note" id="memState"></span></div>
+        <div class="card" style="padding:14px 16px">
+          <div class="row" style="justify-content:space-between">
+            <div class="small" id="memDetail" style="font-size:13.5px">Loading…</div>
+            <button class="btn" id="rebuild" type="button">Rebuild now</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sechead"><h2>Deal Brain rules</h2><span class="note" id="ruleCount"></span></div>
+        <p class="note" style="margin:0">Deal Brain follows active rules on every answer. Rules also come from thumbs-down feedback in the chat.</p>
+        <div class="card">
+          <form class="addrule" id="addRule" autocomplete="off">
+            <label for="newRule" hidden>New rule</label>
+            <input type="text" id="newRule" placeholder="e.g. Treat “Aakash to Clean” deals as undecided">
+            <button class="btn pri" type="submit">Add rule</button>
+          </form>
+          <div class="items" id="rules"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sechead"><h2>Saved insights</h2><span class="note" id="insCount"></span></div>
+        <div class="card"><div class="items" id="insights"><div class="empty">Loading…</div></div></div>
+      </div>
+
+      <div class="sec">
+        <h2>Open on their own</h2>
+        <div class="links">
+          <a class="card" href="https://claude.ai/artifact/AwCN9gXy12zRraiM55sBjp" target="_blank" rel="noopener"><b>Deal Brain</b><span class="small">The shared chat page your team uses. Its link is unchanged.</span></a>
+          <a class="card" href="https://claude.ai/artifact/6z2vFosHQXm3CUQxJnesyk" target="_blank" rel="noopener"><b>Notion Sync</b><span class="small">The original sync page, kept as a backup.</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane scroll" id="p-data" role="tabpanel" aria-labelledby="t-data" hidden>
+    <div class="wrap">
+      <header>
+        <h1>Edit data</h1>
+        <p class="lead">Fix a deal's founders and status, or correct how a previous company is identified. Deal edits are written to Notion first, then Supabase, so the next sync keeps them. Deal Brain sees changes after the memory rebuild that starts on save (about two minutes).</p>
+      </header>
+      <div class="seg" role="group" aria-label="What to edit">
+        <button type="button" data-mode="deals" aria-pressed="true">Deals</button>
+        <button type="button" data-mode="companies" aria-pressed="false">Company labels</button>
+      </div>
+
+      <div id="dealsView" class="split">
+        <div class="card">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--line)">
+            <label for="dealQ" hidden>Search deals</label>
+            <input type="search" id="dealQ" placeholder="Search by deal or founder name">
+          </div>
+          <div class="listhead" id="dealListHead">Most recent deals</div>
+          <div class="results" id="dealList"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="card" id="dealEditor"><div class="empty">Pick a deal to edit it.</div></div>
+      </div>
+
+      <div id="compView" class="split" hidden>
+        <div class="card">
+          <div style="padding:12px 14px;border-bottom:1px solid var(--line)">
+            <label for="compQ" hidden>Search companies</label>
+            <input type="search" id="compQ" placeholder="Search a previous company, e.g. Groww">
+          </div>
+          <div id="compList" class="results"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="card" id="compEditor"><div class="empty">Pick a company name to check or change its label.</div></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+/*__CHILDREN__*/
+const PROJECT_ID = "gdxufeytlxadbfzaorrx";
+const SUPA = "Supabase", NOTION = "Notion";
+const STATUS_OPTIONS = ["Aakash to Clean","Evaluating","Dilligence","Brainstorming","IC","Transactions","To be Passed","Pass","Late","Track","To be passed - Call"];
+const SOURCES = [
+  ["snapshot","Deal Pipeline – Local Snapshot"],["pipeline","Deal Pipeline"],["tracxn","Tracxn Fund - Last 1Y"],["f3breakup","F3 Company Breakup"],
+  ["master","F3 Sector Super Master"],["missing","Investor Missing Deals"],["coverage","Out of Coverage Deals"]
+];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmtN = n => n == null ? "—" : Number(n).toLocaleString("en-IN");
+const when = t => t ? new Date(t).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "never";
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- Embedded apps ---------- */
+// Each app runs in its own frame so their styles and scripts stay separate; the frame borrows this page's connector access.
+// The frames call connectors and Claude through this page. Arguments are re-created here (plain data, a local stop signal,
+// local tool wrappers) because the platform only accepts objects made by this page itself.
+const clone = v => v == null || typeof v !== "object" ? v : JSON.parse(JSON.stringify(v));
+function bridgeSignal(s){ if (!s) return undefined; const c = new AbortController(); if (s.aborted) c.abort(); else s.addEventListener("abort", () => c.abort(), { once: true }); return c.signal; }
+const asError = e => { if (e instanceof Error) return e; const x = new Error(e?.message || String(e)); for (const k of ["code", "retryable", "retryAfterMs", "text", "result", "body"]) if (e && e[k] !== undefined) x[k] = e[k]; return x; };
+function bridgeOpts(o){
+  if (!o || typeof o !== "object") return o;
+  const r = {};
+  for (const k of Object.keys(o)) {
+    const v = o[k];
+    if (k === "signal") r.signal = bridgeSignal(v);
+    else if (k === "tools" && Array.isArray(v)) r.tools = v.map(t => ({ name: t.name, description: t.description, inputSchema: clone(t.inputSchema),
+      execute: async inp => { try { const out = await t.execute(inp); return typeof out === "object" ? clone(out) : out; } catch (e) { throw new Error(e?.message || String(e)); } } }));
+    else if (typeof v === "function") r[k] = (...a) => v(...a);
+    else r[k] = clone(v);
+  }
+  return r;
+}
+const wrapCall = fn => async (...a) => { try { return await fn(); } catch (e) { throw asError(e); } };
+const bridged = {};
+window.__hubUse = name => bridged[name] ||= (async () => {
+  const ns = window.claude?.use ? await window.claude.use(name) : null;
+  if (!ns) return null;
+  if (name === "sample") {
+    const f = (input, o) => wrapCall(() => ns(clone(input), bridgeOpts(o)))();
+    f.json = (input, o) => wrapCall(() => ns.json(clone(input), bridgeOpts(o)))();
+    if (ns.limits) f.limits = (...a) => ns.limits(...a);
+    return f;
+  }
+  if (name === "mcp") {
+    return new Proxy({}, { get: (_, k) => {
+      if (k === "callTool") return (server, tool, args, o) => wrapCall(() => ns.callTool(server, tool, clone(args), bridgeOpts(o)))();
+      const v = ns[k]; return typeof v === "function" ? (...a) => v.apply(ns, a) : v;
+    } });
+  }
+  return ns;
+})();
+const SHIM = '<script>(function(){var p=window.parent;window.claude={use:function(n){try{return p.__hubUse(n)}catch(e){return Promise.resolve(null)}}};try{var t=p.document.documentElement.getAttribute("data-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}})();<\/script>';
+const frames = {};
+function mountFrame(key){
+  if (frames[key]) return frames[key];
+  const f = document.createElement("iframe");
+  f.title = key === "brain" ? "Deal Brain" : "Notion Sync";
+  f.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' + SHIM + '</head><body>' + CHILD[key] + '</body></html>';
+  $("#p-" + key).append(f);
+  return frames[key] = f;
+}
+// Keep the frames' light/dark choice in step with this page.
+new MutationObserver(() => {
+  const t = document.documentElement.getAttribute("data-theme");
+  for (const f of Object.values(frames)) { try { const r = f.contentDocument.documentElement; t ? r.setAttribute("data-theme", t) : r.removeAttribute("data-theme"); } catch {} }
+}).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+/* ---------- Tabs ---------- */
+const PANES = ["brain", "sync", "settings", "data"];
+let loaded = {};
+function show(key){
+  if (!PANES.includes(key)) key = "brain";
+  for (const k of PANES) { $("#p-" + k).hidden = k !== key; $("#t-" + k).setAttribute("aria-selected", String(k === key)); }
+  if (key === "brain" || key === "sync") mountFrame(key);
+  if (key === "settings" && !loaded.settings) { loaded.settings = true; loadSettings(); }
+  if (key === "data" && !loaded.data) { loaded.data = true; searchDeals(""); }
+  try { localStorage.setItem("dealhub.tab", key); } catch {}
+  if (location.hash.slice(1) !== key) history.replaceState(null, "", "#" + key);
+}
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => show(b.dataset.pane));
+$(".tabs").addEventListener("keydown", e => {
+  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+  const i = PANES.findIndex(k => $("#t-" + k).getAttribute("aria-selected") === "true");
+  const n = PANES[(i + (e.key === "ArrowRight" ? 1 : PANES.length - 1)) % PANES.length];
+  show(n); $("#t-" + n).focus();
+});
+// A sync keeps running while you look at other tabs; the dot shows it's busy.
+setInterval(() => { let busy = false; try { const s = frames.sync?.contentDocument?.getElementById("stop"); busy = !!s && !s.hidden; } catch {} $("#syncDot").hidden = !busy; }, 2000);
+
+/* ---------- Connectors ---------- */
+let mcpP = null;
+const getMcp = () => mcpP ||= (window.claude?.use ? window.claude.use("mcp") : Promise.resolve(null));
+function mcpMessage(e, server){
+  switch (e?.code) {
+    case "server_not_connected": case "selection_required": return `${server} isn't connected. Add it in claude.ai Settings → Connectors, then reload.`;
+    case "needs_reauth": return `Your ${server} connection expired. Reconnect it in claude.ai Settings → Connectors.`;
+    case "not_in_manifest": case "not_granted": return `${server} access is turned off for this page. Allow ${server} and try again.`;
+    case "blocked_by_policy": case "approval_required": return `Your organization's policy blocks this ${server} action here.`;
+    case "capability_disabled": case "capability_removed": return "Connectors aren't available in this view. Open the page in claude.ai.";
+    default: return null;
+  }
+}
+const errMsg = (e, server = SUPA) => mcpMessage(e, server) || String(e?.message || e?.code || e).replace(/^Error:\s*/, "").slice(0, 300);
+const MA = "@@ROWS@@", MB = "@@END@@";
+function unwrapRows(res){
+  const c = []; const add = v => { if (v != null) c.push(typeof v === "string" ? v : JSON.stringify(v)); };
+  add(res?.payload); for (const b of (res?.content || [])) if (typeof b?.text === "string") add(b.text); add(res?.structuredContent);
+  for (const s of c) {
+    const i = s.indexOf(MA), j = s.lastIndexOf(MB); if (i < 0 || j <= i) continue; let body = s.slice(i + MA.length, j);
+    for (let k = 0; k < 4; k++) { try { const v = JSON.parse(body); if (Array.isArray(v)) return v; if (typeof v === "string") { body = v; continue; } } catch {} try { body = JSON.parse('"' + body + '"'); } catch { break; } }
+    const m = s.match(/ERROR[:\s].{0,300}/); if (m) throw new Error(m[0]);
+  }
+  const all = c.join(" "); const m = all.match(/(ERROR|error)[:\s"]+[^"]{0,300}/); if (m) throw new Error(m[0]);
+  throw new Error("Couldn't read Supabase's reply.");
+}
+async function rows(select){
+  const mcp = await getMcp(); if (!mcp) throw new Error("Connectors aren't available in this view. Open the page in claude.ai with Supabase connected.");
+  return unwrapRows(await mcp.callTool(SUPA, "execute_sql", { project_id: PROJECT_ID, query: `select '${MA}' || coalesce(json_agg(q), '[]'::json)::text || '${MB}' as r from (${select}) q` }, { cache: false }));
+}
+const asJson = v => typeof v === "string" ? JSON.parse(v) : v;
+function dq(text){ let tag; do { tag = "h" + Math.random().toString(36).slice(2, 8); } while (String(text).includes("$" + tag + "$")); return "$" + tag + "$" + text + "$" + tag + "$"; }
+async function call(fn, obj){ const [r] = await rows(`select public.${fn}(${dq(JSON.stringify(obj))}::jsonb) as r`); return asJson(r?.r); }
+
+let toastT;
+function toast(msg, err){ const t = $("#toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, err ? 6000 : 3200); }
+
+/* ---------- Health line ---------- */
+let hub = null;
+async function loadHub(){
+  const [r] = await rows("select public.hub_settings_get() as r");
+  hub = asJson(r.r);
+  const lr = hub.last_refresh || {}, ls = hub.last_sync || {};
+  const lastSync = Object.entries(ls).filter(([k]) => k !== "brain").map(([, v]) => v.at).sort().pop();
+  $("#health").innerHTML = `Synced <b>${esc(when(lastSync))}</b> · <b>${fmtN(lr.total)}</b> memory docs${hub.pending_embedding ? ` · ${fmtN(hub.pending_embedding)} embedding` : ""}`;
+  return hub;
+}
+
+/* ---------- Settings: sync ---------- */
+function renderSync(){
+  const s = hub.settings?.sync || {}, src = s.sources || {};
+  const job = Object.fromEntries((hub.nightly || []).map(j => [j.source, j]));
+  const nl = hub.nightly_last || {}, ls = hub.last_sync || {};
+  const tb = $("#srcRows"); tb.replaceChildren();
+  const sw = (id, on, label) => `<label class="sw"><input type="checkbox" id="${id}" ${on ? "checked" : ""} aria-label="${esc(label)}"><span></span></label>`;
+  for (const [k, title] of SOURCES) {
+    const n = nl[k], tr = document.createElement("tr");
+    tr.innerHTML = `<td><b style="font-weight:600">${esc(title)}</b></td>
+      <td class="c">${sw("inc-" + k, src[k] !== false, title + " in Sync all")}</td>
+      <td class="c">${job[k] ? sw("ngt-" + k, job[k].active, title + " nightly") : "—"}</td>
+      <td class="small">${ls[k] ? `${esc(when(ls[k].at))} · ${fmtN(ls[k].rows)} rows` : "never"}</td>
+      <td>${n ? `<span class="pill ${n.ok ? "ok" : "bad"}" title="${esc(n.note || "")}">${n.ok ? "OK" : "Failed"}</span> <span class="small">${esc(when(n.at))}</span>` : '<span class="small">no runs yet</span>'}</td>`;
+    tb.append(tr);
+  }
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><b style="font-weight:600">Deal page content</b><div class="small">Meeting summaries, notes and transcripts</div></td><td class="c">${sw("inc-content", s.content !== false, "Page content in Sync all")}</td><td class="c">—</td><td class="small">—</td><td class="small">manual only</td>`;
+  tb.append(tr);
+  $("#days").value = s.content_days || 45;
+  const failing = Object.values(nl).filter(x => !x.ok);
+  const w = $("#nightlyWarn");
+  if (failing.length) {
+    w.hidden = false;
+    w.innerHTML = `<b>The nightly sync can't read Notion yet</b> (${failing.length} source${failing.length > 1 ? "s" : ""} failed last time). It needs a Notion token from a Sparrow workspace owner. Until then, run <b>Sync all</b> from the Notion Sync tab.<ol><li>A workspace owner creates an internal integration at notion.so/profile/integrations (read content) and copies its secret.</li><li>They add it under ••• → Connections on the Deal Analysis page and each database.</li><li>In Supabase, open Edge Functions → Secrets and set <code>NOTION_TOKEN</code> to that secret.</li></ol>`;
+  } else w.hidden = true;
+  $("#saveSync").disabled = false;
+}
+$("#saveSync").onclick = async () => {
+  const b = $("#saveSync"); b.disabled = true; $("#syncSaved").textContent = "Saving…";
+  const days = Number($("#days").value);
+  if (!(days >= 1 && days <= 365)) { $("#syncSaved").textContent = "Pick a number of days between 1 and 365."; b.disabled = false; return; }
+  const sources = {}, nightly = {};
+  for (const [k] of SOURCES) { sources[k] = $("#inc-" + k).checked; const n = $("#ngt-" + k); if (n) nightly[k] = n.checked; }
+  try {
+    hub = await call("hub_settings_save", { sync: { sources, content: $("#inc-content").checked, content_days: days }, nightly });
+    renderSync(); $("#syncSaved").textContent = "Saved. Sync all and the nightly job use these settings from now on."; toast("Sync settings saved");
+  } catch (e) { $("#syncSaved").textContent = ""; toast(errMsg(e), true); }
+  b.disabled = false;
+};
+
+/* ---------- Settings: semantic memory ---------- */
+function renderMem(){
+  const lr = hub.last_refresh || {};
+  $("#memState").textContent = lr.finished_at ? `Rebuilt ${when(lr.finished_at)}` : "";
+  const kinds = lr.by_kind ? Object.entries(lr.by_kind).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${fmtN(v)} ${k.replace(/_/g, " ")}`).join(", ") : "";
+  $("#memDetail").innerHTML = `<b style="font-weight:600;color:var(--ink)">${fmtN(lr.total)}</b> searchable documents${kinds ? ` (${esc(kinds)}…)` : ""}. ${hub.pending_embedding ? `${fmtN(hub.pending_embedding)} waiting to be embedded; that runs every minute in the background.` : "All embedded."}`;
+}
+$("#rebuild").onclick = async () => {
+  const b = $("#rebuild"); b.disabled = true; b.textContent = "Rebuilding…";
+  try {
+    const q = await call0("brain_request_refresh"); const reqAt = new Date(q.requested_at); const t0 = Date.now();
+    while (Date.now() - t0 < 8 * 60000) {
+      await sleep(10000);
+      await loadHub(); const lr = hub.last_refresh || {};
+      $("#memState").textContent = `Rebuilding in the background… ${Math.round((Date.now() - t0) / 1000)}s`;
+      if (lr.requested_at && new Date(lr.requested_at) >= reqAt) { renderMem(); toast(lr.ok ? "Memory rebuilt" : "Rebuild failed: " + (lr.error || "unknown"), !lr.ok); break; }
+    }
+  } catch (e) { toast(errMsg(e), true); }
+  b.disabled = false; b.textContent = "Rebuild now";
+};
+async function call0(fn){ const [r] = await rows(`select public.${fn}() as r`); return asJson(r?.r); }
+
+/* ---------- Settings: rules and insights ---------- */
+function item(html, off, ops){
+  const it = document.createElement("div"); it.className = "item" + (off ? " off" : "");
+  const tx = document.createElement("div"); tx.className = "tx"; tx.innerHTML = html;
+  const o = document.createElement("div"); o.className = "ops";
+  for (const [label, fn, danger] of ops) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "btn" + (danger ? " danger" : ""); b.textContent = label;
+    b.onclick = async () => {
+      if (danger && b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Confirm"; setTimeout(() => { b.dataset.sure = ""; b.textContent = label; }, 3500); return; }
+      b.disabled = true; try { await fn(); await loadMemory(); } catch (e) { toast(errMsg(e), true); b.disabled = false; }
+    };
+    o.append(b);
+  }
+  it.append(tx, o); return it;
+}
+async function loadMemory(){
+  const [r] = await rows("select public.brain_memory_list() as m"); const m = asJson(r.m);
+  const rl = $("#rules"); rl.replaceChildren();
+  $("#ruleCount").textContent = `${(m.rules || []).filter(x => x.active).length} active`;
+  if (!m.rules?.length) rl.innerHTML = '<div class="empty">No rules yet. Add one above.</div>';
+  for (const x of m.rules || []) rl.append(item(`${esc(x.rule)}<div class="meta">${x.active ? "Active" : "Paused"} · ${x.source === "manual" ? "added by hand" : "from feedback"} · ${esc(x.created)}</div>`, !x.active,
+    [[x.active ? "Pause" : "Resume", () => call("brain_memory_update", { kind: "rule", id: x.id, action: x.active ? "off" : "on" })], ["Delete", () => call("brain_memory_update", { kind: "rule", id: x.id, action: "delete" }), true]]));
+  const il = $("#insights"); il.replaceChildren();
+  $("#insCount").textContent = `${(m.insights || []).length}`;
+  if (!m.insights?.length) il.innerHTML = '<div class="empty">Nothing saved yet. Use “Save to brain” under a Deal Brain answer.</div>';
+  for (const x of m.insights || []) il.append(item(`<b style="font-weight:600">${esc(x.title)}</b><div>${esc(String(x.insight || "").slice(0, 500))}</div><div class="meta">${x.active ? "" : "Hidden · "}Saved ${esc(x.created)}</div>`, !x.active,
+    [[x.active ? "Hide" : "Show", () => call("brain_memory_update", { kind: "insight", id: x.id, action: x.active ? "off" : "on" })], ["Delete", () => call("brain_memory_update", { kind: "insight", id: x.id, action: "delete" }), true]]));
+}
+$("#addRule").onsubmit = async e => {
+  e.preventDefault(); const v = $("#newRule").value.trim(); if (!v) return;
+  try { await call("brain_memory_update", { kind: "rule", action: "add", text: v }); $("#newRule").value = ""; toast("Rule added"); await loadMemory(); } catch (err) { toast(errMsg(err), true); }
+};
+async function loadSettings(){
+  try { if (!hub) await loadHub(); renderSync(); renderMem(); $("#setBanner").hidden = true; }
+  catch (e) { $("#setBanner").hidden = false; $("#setBanner").textContent = errMsg(e); $("#srcRows").innerHTML = '<tr><td colspan="5" class="small">Couldn\'t load.</td></tr>'; }
+  try { await loadMemory(); } catch (e) { $("#rules").innerHTML = `<div class="empty">${esc(errMsg(e))}</div>`; }
+}
+
+/* ---------- Edit data: mode ---------- */
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  const deals = b.dataset.mode === "deals";
+  $("#dealsView").hidden = !deals; $("#compView").hidden = deals;
+  if (!deals && !loaded.comp) { loaded.comp = true; searchCompanies(""); }
+});
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+/* ---------- Edit data: deals ---------- */
+const DEAL_FIELDS = [
+  ["status", "Status", "Status", "select"],
+  ["founder_name", "Founder Name", "Founder name(s)", "text", "Separate co-founders with commas."],
+  ["founder_linkedin", "Founder LinkedIn", "Founder LinkedIn", "text", "Optional. One URL per founder, comma separated."],
+  ["previous_company_worked_at", "Previous Company Worked At", "Previous companies", "area", "Comma separated. Deal Brain matches these to verified companies."],
+  ["description", "Description", "Description", "area"]
+];
+let dealSeq = 0, curDeal = null;
+async function searchDeals(q){
+  const seq = ++dealSeq, list = $("#dealList");
+  $("#dealListHead").textContent = q ? `Matches for “${q}”` : "Most recent deals";
+  list.innerHTML = '<div class="empty">Searching…</div>';
+  const where = q ? `where deal ilike ${dq("%" + q + "%")} or founder_name ilike ${dq("%" + q + "%")}` : "";
+  try {
+    const r = await rows(`select id, url, deal, status, meeting_date, created_time::date as created, founder_name, founder_linkedin, previous_company_worked_at, description from public.nt_deal_pipeline ${where} order by greatest(created_time, meeting_date::timestamptz) desc nulls last limit 40`);
+    if (seq !== dealSeq) return;
+    list.replaceChildren();
+    if (!r.length) { list.innerHTML = '<div class="empty">No deals match. Try part of the name.</div>'; return; }
+    for (const d of r) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "res";
+      b.innerHTML = `<b></b><div class="meta"><span class="pill"></span><span class="d"></span><span class="f"></span></div>`;
+      b.querySelector("b").textContent = d.deal || "(untitled)";
+      b.querySelector(".pill").textContent = d.status || "No status";
+      b.querySelector(".d").textContent = d.meeting_date ? "Met " + d.meeting_date : (d.created ? "Added " + d.created : "");
+      b.querySelector(".f").textContent = d.founder_name ? d.founder_name.slice(0, 60) : "No founder yet";
+      if (curDeal?.id === d.id) b.setAttribute("aria-current", "true");
+      b.onclick = () => { list.querySelectorAll(".res").forEach(x => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "true"); editDeal(d); };
+      list.append(b);
+    }
+  } catch (e) { if (seq === dealSeq) list.innerHTML = `<div class="empty">${esc(errMsg(e))}</div>`; }
+}
+$("#dealQ").addEventListener("input", debounce(e => searchDeals(e.target.value.trim()), 350));
+function editDeal(d){
+  curDeal = d;
+  const box = $("#dealEditor");
+  box.innerHTML = `<div class="editor"><div><h3></h3><div class="small"><a target="_blank" rel="noopener">Open in Notion</a><span class="mt"></span></div></div><div class="grid2" id="dfA"></div><div class="fields" id="dfB" style="display:flex;flex-direction:column;gap:12px"></div><div class="row"><button class="btn pri" type="button" id="dealSave" disabled>Save to Notion and Supabase</button><button class="btn" type="button" id="dealReset">Undo changes</button><span class="note" id="dealMsg"></span></div></div>`;
+  box.querySelector("h3").textContent = d.deal || "(untitled)";
+  const a = box.querySelector("a"); if (d.url) a.href = d.url; else a.remove();
+  box.querySelector(".mt").textContent = (d.url ? " · " : "") + [d.meeting_date && "Met " + d.meeting_date, d.created && "Added " + d.created].filter(Boolean).join(" · ");
+  for (const [key, , label, kind, help] of DEAL_FIELDS) {
+    const f = document.createElement("div"); f.className = "field";
+    const id = "df-" + key;
+    let input;
+    if (kind === "select") { input = document.createElement("select"); input.innerHTML = '<option value="">No status</option>' + STATUS_OPTIONS.map(o => `<option>${esc(o)}</option>`).join(""); if (d.status && !STATUS_OPTIONS.includes(d.status)) input.insertAdjacentHTML("beforeend", `<option>${esc(d.status)}</option>`); }
+    else if (kind === "area") { input = document.createElement("textarea"); input.rows = key === "description" ? 4 : 3; }
+    else { input = document.createElement("input"); input.type = "text"; }
+    input.id = id; input.value = d[key] || ""; input.dataset.key = key;
+    f.innerHTML = `<label for="${id}">${esc(label)}</label>`; f.append(input);
+    if (help) { const h = document.createElement("div"); h.className = "help"; h.textContent = help; f.append(h); }
+    (key === "status" || key === "founder_name" ? box.querySelector("#dfA") : box.querySelector("#dfB")).append(f);
+    input.addEventListener("input", dealDirty);
+  }
+  box.querySelector("#dealReset").onclick = () => editDeal(d);
+  box.querySelector("#dealSave").onclick = saveDeal;
+}
+function dealChanges(){
+  const ch = {};
+  for (const [key] of DEAL_FIELDS) { const v = $("#df-" + key).value.trim(); if (v !== (curDeal[key] || "").trim()) ch[key] = v; }
+  return ch;
+}
+function dealDirty(){ const n = Object.keys(dealChanges()).length; const b = $("#dealSave"); b.disabled = !n; b.textContent = n ? `Save ${n} change${n > 1 ? "s" : ""} to Notion and Supabase` : "Save to Notion and Supabase"; $("#dealMsg").textContent = ""; }
+async function saveDeal(){
+  const ch = dealChanges(); if (!Object.keys(ch).length) return;
+  const b = $("#dealSave"), msg = $("#dealMsg"); b.disabled = true; msg.textContent = "Writing to Notion…";
+  const props = {}; for (const [key, prop] of DEAL_FIELDS) if (key in ch) props[prop] = ch[key] === "" ? null : ch[key];
+  try {
+    const mcp = await getMcp(); if (!mcp) throw new Error("Connectors aren't available in this view.");
+    await mcp.callTool(NOTION, "notion-update-page", { page_id: curDeal.id, command: "update_properties", properties: props, allow_async: false }, { cache: false });
+  } catch (e) { msg.textContent = ""; toast("Notion didn't save it: " + errMsg(e, NOTION), true); b.disabled = false; return; }
+  msg.textContent = "Saved in Notion. Updating Supabase…";
+  try { await call("hub_deal_save", { id: curDeal.id, ...ch }); }
+  catch (e) { msg.textContent = "Saved in Notion, but Supabase didn't update. The next sync will copy it."; toast(errMsg(e), true); b.disabled = false; return; }
+  Object.assign(curDeal, ch); editDeal(curDeal);
+  $("#dealMsg").textContent = "Saved. Deal Brain picks it up in about two minutes.";
+  toast("Deal saved"); searchDeals($("#dealQ").value.trim());
+}
+
+/* ---------- Edit data: company labels ---------- */
+const STATUS_LABEL = { verified: ["Verified", "ok"], probable: ["Probable", "acc"], not_found: ["Not found online", "warn"], unresolved: ["Not a company", "bad"], unchecked: ["Not labelled", ""] };
+let compSeq = 0;
+async function searchCompanies(q){
+  const seq = ++compSeq, list = $("#compList"); list.innerHTML = '<div class="empty">Searching…</div>';
+  const pat = q ? dq("%" + q + "%") : null;
+  const labelled = q
+    ? `select c.*, (select count(distinct founder_key) from public.mv_founder_employers_v2 m where m.company = c.name)::int as founders from public.company_entities c where c.name ilike ${pat} or c.entity ilike ${pat} or c.parent_group ilike ${pat} order by founders desc, c.name limit 40`
+    : `select c.*, (select count(distinct founder_key) from public.mv_founder_employers_v2 m where m.company = c.name)::int as founders from public.company_entities c where c.status in ('not_found','unresolved') or c.confidence = 'low' order by founders desc, c.name limit 40`;
+  const unl = `select company as name, count(distinct founder_key)::int as founders from public.mv_founder_employers_v2 m where m.entity_status = 'unchecked' ${q ? `and m.company ilike ${pat}` : ""} and not exists (select 1 from public.company_entities c where c.name = m.company) group by company order by founders desc, company limit 25`;
+  try {
+    const [a, u] = [await rows(labelled), await rows(unl)];
+    if (seq !== compSeq) return;
+    list.replaceChildren();
+    const head = t => { const h = document.createElement("div"); h.className = "listhead"; h.textContent = t; list.append(h); };
+    head(q ? "Labelled names" : "Needs review: not found, not a company, or low confidence");
+    if (!a.length) list.insertAdjacentHTML("beforeend", '<div class="empty">None.</div>');
+    for (const c of a) list.append(compRow(c));
+    head(q ? "Not labelled yet" : "Most-used names without a label");
+    if (!u.length) list.insertAdjacentHTML("beforeend", '<div class="empty">None.</div>');
+    for (const c of u) list.append(compRow({ ...c, status: "unchecked" }));
+  } catch (e) { if (seq === compSeq) list.innerHTML = `<div class="empty">${esc(errMsg(e))}</div>`; }
+}
+function compRow(c){
+  const b = document.createElement("button"); b.type = "button"; b.className = "res";
+  const [lab, cls] = STATUS_LABEL[c.status] || [c.status, ""];
+  b.innerHTML = `<b></b><div class="meta"><span class="pill ${cls}"></span><span class="e"></span><span class="n"></span></div>`;
+  b.querySelector("b").textContent = c.name;
+  b.querySelector(".pill").textContent = lab;
+  b.querySelector(".e").textContent = c.entity && c.entity !== c.name ? "→ " + c.entity + (c.parent_group && c.parent_group !== c.entity ? ` (${c.parent_group})` : "") : "";
+  b.querySelector(".n").textContent = `${fmtN(c.founders)} founder${c.founders === 1 ? "" : "s"}`;
+  b.onclick = () => { $("#compList").querySelectorAll(".res").forEach(x => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "true"); editCompany(c); };
+  return b;
+}
+$("#compQ").addEventListener("input", debounce(e => searchCompanies(e.target.value.trim()), 350));
+function editCompany(c){
+  const box = $("#compEditor");
+  box.innerHTML = `<form class="editor" id="compForm" autocomplete="off">
+    <div><h3></h3><div class="small" id="ceMeta"></div></div>
+    <div class="grid2">
+      <div class="field"><label for="ce-entity">Real company</label><input type="text" id="ce-entity"><div class="help">The company this name refers to. Spelling variants share one name, e.g. Groww Pay → Groww.</div></div>
+      <div class="field"><label for="ce-parent">Parent group</label><input type="text" id="ce-parent"><div class="help">Optional, e.g. Tata Group.</div></div>
+      <div class="field"><label for="ce-status">Status</label><select id="ce-status"><option value="verified">Verified, a real company</option><option value="probable">Probably real</option><option value="not_found">Not found online</option><option value="unresolved">Not a company (self-employed, stealth…)</option></select></div>
+      <div class="field"><label for="ce-domain">Website</label><input type="text" id="ce-domain" placeholder="groww.in"></div>
+    </div>
+    <div class="field"><label for="ce-type">Type</label><input type="text" id="ce-type" placeholder="startup, MNC, consulting, bank…"></div>
+    <div class="field"><label for="ce-note">Note</label><textarea id="ce-note" rows="2"></textarea></div>
+    <div class="row"><button class="btn pri" type="submit">Save label</button><button class="btn danger" type="button" id="ceDel" hidden>Remove label</button><span class="note" id="ceMsg"></span></div>
+  </form>`;
+  box.querySelector("h3").textContent = c.name;
+  const ev = c.evidence_url ? ` · <a href="${esc(c.evidence_url)}" target="_blank" rel="noopener">source</a>` : "";
+  box.querySelector("#ceMeta").innerHTML = `Used by ${fmtN(c.founders)} founder${c.founders === 1 ? "" : "s"}${c.confidence ? ` · confidence: ${esc(c.confidence)}` : ""}${c.checked_at ? ` · checked ${esc(String(c.checked_at).slice(0, 10))}` : ""}${ev}`;
+  $("#ce-entity").value = c.entity || (c.status === "unchecked" ? c.name : "");
+  $("#ce-parent").value = c.parent_group || ""; $("#ce-domain").value = c.domain || ""; $("#ce-type").value = c.entity_type || ""; $("#ce-note").value = c.note || "";
+  $("#ce-status").value = STATUS_LABEL[c.status] && c.status !== "unchecked" ? c.status : "verified";
+  const del = $("#ceDel"); del.hidden = c.status === "unchecked";
+  del.onclick = async () => {
+    if (del.dataset.sure !== "1") { del.dataset.sure = "1"; del.textContent = "Confirm remove"; setTimeout(() => { del.dataset.sure = ""; del.textContent = "Remove label"; }, 3500); return; }
+    try { await call("hub_company_save", { name: c.name, action: "delete" }); toast("Label removed"); box.innerHTML = '<div class="empty">Label removed. Pick another name.</div>'; searchCompanies($("#compQ").value.trim()); } catch (e) { toast(errMsg(e), true); }
+  };
+  $("#compForm").onsubmit = async e => {
+    e.preventDefault();
+    const st = $("#ce-status").value, ent = $("#ce-entity").value.trim();
+    if ((st === "verified" || st === "probable") && !ent) { $("#ceMsg").textContent = "Add the real company name, or pick another status."; return; }
+    $("#ceMsg").textContent = "Saving…";
+    try {
+      await call("hub_company_save", { name: c.name, entity: st === "unresolved" ? null : ent, parent_group: $("#ce-parent").value, status: st, domain: $("#ce-domain").value, entity_type: $("#ce-type").value, note: $("#ce-note").value });
+      $("#ceMsg").textContent = "Saved. Deal Brain uses it after the rebuild (about two minutes)."; toast("Label saved");
+      Object.assign(c, { entity: ent, status: st, confidence: "manual" }); del.hidden = false; searchCompanies($("#compQ").value.trim());
+    } catch (err) { $("#ceMsg").textContent = ""; toast(errMsg(err), true); }
+  };
+}
+
+/* ---------- Start ---------- */
+let start = "brain";
+try { start = localStorage.getItem("dealhub.tab") || start; } catch {}
+if (PANES.includes(location.hash.slice(1))) start = location.hash.slice(1);
+show(start);
+window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+loadHub().catch(e => { $("#health").textContent = "Status unavailable"; });
+</script>

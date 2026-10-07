@@ -1,0 +1,572 @@
+<title>Notion Sync</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one control column — header, source table with per-row progress, activity log. */
+:root{
+  --bg:#f5f6f3; --surface:#ffffff; --ink:#18201d; --muted:#5d6a64; --line:#dde2dd;
+  --accent:#1f6f5c; --accent-ink:#ffffff; --accent-soft:#e3efe9; --ok:#1f7a45; --warn:#9a5b00; --bad:#a3322a; --code:#eef1ed;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111614; --surface:#18201d; --ink:#e6ebe8; --muted:#97a39d; --line:#2a3430;
+  --accent:#5cc4a5; --accent-ink:#0d1714; --accent-soft:#1c2e28; --ok:#6fd49a; --warn:#e0a54a; --bad:#ef7d72; --code:#1f2825; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111614; --surface:#18201d; --ink:#e6ebe8; --muted:#97a39d; --line:#2a3430;
+  --accent:#5cc4a5; --accent-ink:#0d1714; --accent-soft:#1c2e28; --ok:#6fd49a; --warn:#e0a54a; --bad:#ef7d72; --code:#1f2825; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.55}
+.wrap{max-width:1000px;margin:0 auto;padding-inline:16px;padding-block:28px 60px;display:flex;flex-direction:column;gap:20px}
+h1{font-family:var(--f-display);font-size:30px;line-height:1.1;margin:0;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:6px 0 0;max-width:70ch}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);background:var(--surface);color:var(--ink);padding:7px 14px;font-size:14px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.hint{font-size:13px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--code)}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;white-space:nowrap}
+.name{font-weight:600}
+.small{font-size:12px;color:var(--muted)}
+code{font-family:var(--f-mono);font-size:12px;background:var(--code);padding:1px 5px;border-radius:4px}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--code);color:var(--muted);white-space:nowrap}
+.pill.ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.pill.run{background:var(--accent-soft);color:var(--accent)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 14%,transparent);color:var(--bad)}
+.pill.warn{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
+.prog{height:5px;background:var(--code);border-radius:99px;margin-top:6px;overflow:hidden;min-width:90px}
+.prog>i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.match{font-weight:600}.match.ok{color:var(--ok)}.match.bad{color:var(--bad)}
+.log{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-family:var(--f-mono);font-size:12.5px;max-height:280px;overflow:auto;white-space:pre-wrap;color:var(--muted)}
+.log b{color:var(--ink);font-weight:500}
+.log .e{color:var(--bad)}
+.label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.banner{border:1px solid var(--line);border-left:3px solid var(--warn);background:var(--surface);border-radius:10px;padding:10px 14px;font-size:14px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>Notion Sync</h1>
+    <p class="sub">Copies every data source in <b>Deal Analysis - Anwesh</b> from Notion into the Sparrow VC Supabase database, one way. Notion is only read, never changed. Re-run it whenever Notion changes; rows deleted in Notion are removed from Supabase too.</p>
+  </header>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="bar">
+    <button class="primary" id="syncAll" type="button">Sync all sources</button>
+    <button id="check" type="button">Compare row counts</button>
+    <button id="brain" type="button">Refresh semantic memory</button>
+    <button id="stop" type="button" hidden>Stop</button>
+    <span class="hint" id="hint">Keep this page open while it runs. The Deal Pipeline takes a few minutes; Notion limits how fast it can be read.</span>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead><tr><th>Notion data source</th><th>Supabase table</th><th class="num">Notion rows</th><th class="num">Supabase rows</th><th>Last synced</th><th>Status</th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="hint">Each Notion view has a matching Supabase view, for example <code>v_raw_data</code> and <code>v_local_snapshot</code>. After Local Snapshot copies, the analysis tables Deal Brain uses (<code>deals</code>, <code>founders</code>, <code>roles</code>, <code>companies</code>, <code>investors</code>) are rebuilt from it automatically, keeping the merged company names.</p>
+
+  <div class="card" style="padding:14px 16px">
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+      <div>
+        <div class="name">Deal page content</div>
+        <div class="small">Each Deal Pipeline page's AI meeting summary, meeting notes, call transcript and free-form notes → <code>nt_deal_content</code>, <code>v_deal_content</code></div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <span class="pill" id="cStatus">Not started</span>
+        <button type="button" id="contentBtn">Sync page content</button>
+      </div>
+    </div>
+    <div class="prog" id="cProg"><i></i></div>
+    <div class="small" id="cDet" style="margin-top:6px">Reads every deal page once (newest first), then only new pages and deals from the last 45 days. The first full pass reads about 6,000 pages and takes a few hours, and you can stop and resume it any time.</div>
+  </div>
+
+  <div>
+    <div class="label" style="margin-bottom:8px">Activity</div>
+    <div class="log" id="log" aria-live="polite">Ready.</div>
+  </div>
+</div>
+
+<script>
+const PROJECT_ID = "gdxufeytlxadbfzaorrx";
+const SUPA = "Supabase", SUPA_TOOL = "execute_sql";
+const NOTION = "Notion", NOTION_TOOL = "notion-query-data-sources", NOTION_FETCH = "notion-fetch";
+const PAGE = 100;
+// Shared by the sync page and the local test. [notion column, postgres column, kind]
+const SOURCES = [
+  { key: "snapshot", title: "Deal Pipeline – Local Snapshot", views: "Local Snapshot – Deal Pipeline", table: "nt_local_snapshot",
+    ds: "collection://6f252c27-0bd4-43d2-b457-f61083848a6f", after: "rebuild", cols: [
+    ["Deal","deal","text"],["Status","status","text"],["F3 Classification","f3_classification","text"],["Sectors","sectors","arr"],["Source","source","arr"],
+    ["date:Meeting date:start","meeting_date","date"],["date:Source Created Time:start","source_created_time","ts"],["Source Deal Link","source_deal_link","text"],
+    ["Institutional Funding","institutional_funding","text"],["Founder Name","founder_name","text"],["Founder LinkedIn","founder_linkedin","text"],
+    ["Previous Company Worked At","previous_company_worked_at","text"],["date:Last Synced:start","last_synced","date"],
+    ["Founder 1 Name","founder_1_name","text"],["Founder 1 Linkedin","founder_1_linkedin","text"],["Founder 1 Previous Company Worked At","founder_1_previous_company_worked_at","text"],["Founder 1 Designations ","founder_1_designations","text"],
+    ["Founder 2 Name","founder_2_name","text"],["Founder 2 Linkedin","founder_2_linkedin","text"],["Founder 2 Previous Company Worked At","founder_2_previous_company_worked_at","text"],["Founder 2 Designations ","founder_2_designations","text"],
+    ["Founder 3 Name","founder_3_name","text"],["Founder 3 Linkedin","founder_3_linkedin","text"],["Founder 3 Previous Company Worked At","founder_3_previous_company_worked_at","text"],["Founder 3 Designations ","founder_3_designations","text"],
+    ["Founder 4 Name","founder_4_name","text"],["Founder 4 Linkedin","founder_4_linkedin","text"],["Founder 4 Previous Company Worked At","founder_4_previous_company_worked_at","text"],["Founder 4 Designations ","founder_4_designations","text"]]},
+  { key: "pipeline", title: "Deal Pipeline", views: "Raw Data · Sector Wise - F3 Classification", table: "nt_deal_pipeline",
+    ds: "collection://0b546375-0d59-4b7d-a90e-0c26ebe249ec", cols: [
+    ["Deal","deal","text"],["Status","status","text"],["F2 Classification","f2_classification","text"],["F3 Classification","f3_classification","text"],
+    ["Sectors","sectors","arr"],["Source","source","arr"],["Location","location","text"],["Type","type","text"],["Select","select","text"],
+    ["Risk Evaluation","risk_evaluation","text"],["Decision to Pass Stage","decision_to_pass_stage","text"],["Pass Type","pass_type","arr"],
+    ["Founder Pass Vectors","founder_pass_vectors","arr"],["AntiPortfolio","antiportfolio","text"],["Decision Audit","decision_audit","text"],
+    ["Decision Audit Check","decision_audit_check","bool"],["Acquihire","acquihire","bool"],["Re-Pipeline Reason","re_pipeline_reason","text"],
+    ["date:Re-Pipeline Date:start","re_pipeline_date","date"],["date:Follow up date:start","follow_up_date","date"],["date:Meeting date:start","meeting_date","date"],
+    ["Created time","created_time","ts"],["Created by","created_by","text"],["People","people","arr"],["Description","description","text"],
+    ["Comments","comments","text"],["What stood out","what_stood_out","text"],["What to Check?","what_to_check","text"],["1Y View","view_1y","text"],
+    ["3Y View","view_3y","text"],["5Y View","view_5y","text"],["10Y View","view_10y","text"],["Similar Companies","similar_companies","text"],
+    ["Founder Name","founder_name","text"],["Founder LinkedIn","founder_linkedin","text"],["Previous Company","previous_company","text"],
+    ["Previous Company Worked At","previous_company_worked_at","text"],["Previous Company Worked At (Raw)","previous_company_worked_at_raw","text"],
+    ["Last company worked","last_company_worked","text"],["Email","email","text"],["Documents","documents","text"],["Documents Link","documents_link","text"],
+    ["IM Link","im_link","text"],["Deal Attribution","deal_attribution","arr"],["Institutional Funding","institutional_funding","arr"],
+    ["Sourcing Network Nodes","sourcing_network_nodes","arr"],
+    ["Industry","industry","arr"],["LinkedIn URL","linkedin_url","text"],["Source 1","source_1","text"],["Contact Email","contact_email","text"],
+    ["date:Created Date:start","created_date","date"],["Next Action","next_action","text"]]},
+  { key: "tracxn", title: "Tracxn Fund - Last 1Y - Master", views: "Tracxn Fund", table: "nt_tracxn_rounds",
+    ds: "collection://3e28563d-567d-8060-a348-000b1a00fdaa", cols: [
+    ["Company","company","text"],["Sector","sector","arr"],["date:Round Date:start","round_date","date"],["Founded Year","founded_year","num"],
+    ["Location","location","arr"],["Round Name","round_name","text"],["Round Amount (USD)","round_amount_usd","num"],["Lead Investor","lead_investor","arrsplit"],
+    ["Round Investors","round_investors","arrsplit"],["Sparrow Pipeline","sparrow_pipeline","text"]]},
+  { key: "f3breakup", title: "F3 Classification Company Breakup", views: "F3 Classification Company Breakup", table: "nt_f3_company_breakup",
+    ds: "collection://3f24aaeb-bdfb-43ff-9495-a5c79321e62b", cols: [
+    ["Company Name","company_name","text"],["AI Software and Infra","ai_software_and_infra","num"],["B2B and Manufacturing","b2b_and_manufacturing","num"],
+    ["India Consumption 1","india_consumption_1","num"],["FinTech and FS","fintech_and_fs","num"],["DeepTech","deeptech","num"],
+    ["India Consumption 2 & 3","india_consumption_2_3","num"],["Healthcare","healthcare","num"],["Other","other","num"]]},
+  { key: "master", title: "F3 Sector Super Master", views: "F3 Sector Super Master", table: "nt_f3_sector_master",
+    ds: "collection://17b265f0-4d5e-4693-a83e-0e1110c0b750", cols: [
+    ["Deal","deal","text"],["F3 Sector Classification","f3_sector_classification","text"],["Investor ","investor","arr"],["Status","status","text"],
+    ["date:Created On:start","created_on","date"],["Founder Name","founder_name","text"],["Founder Linkedin ","founder_linkedin","text"],
+    ["Founder Previous Company ","founder_previous_company","text"]]},
+  { key: "missing", title: "Investor Missing Deals", views: "Investor Missing Deals", table: "nt_investor_missing_deals",
+    ds: "collection://3e28563d-567d-80f2-9cf1-000b57d4af8a", cols: [
+    ["Investor","investor","text"],["Missing Deals","missing_deals","num"],["Company Names","company_names","text"],["Sectors","sectors","arr"]]},
+  { key: "coverage", title: "Out of Coverage Deals", views: "Out of Coverage Deals", table: "nt_out_of_coverage_deals",
+    ds: "collection://36b8563d-567d-8093-a947-000b69afae3e", cols: [
+    ["Name","name","text"],["Status","status","text"],["Type","type","text"],["F2 Classification","f2_classification","text"],
+    ["F3 Classification","f3_classification","text"],["Sectors","sectors","arr"],["Source","source","arr"],["Location","location","text"],
+    ["Investor Type","investor_type","text"],["Risk Evaluation","risk_evaluation","text"],["date:Meeting date:start","meeting_date","date"],
+    ["Creation Date","creation_date","ts"],["Notes","notes","text"],["Similar Companies","similar_companies","text"],["Founder Name","founder_name","text"],
+    ["Founder Linkedin ","founder_linkedin","text"],["Previous Companies Worked At","previous_companies_worked_at","text"],["People","people","arr"],
+    ["Investors","investors","arr"],["💰 Sparrow Funds","sparrow_funds","arr"]]}
+];
+
+function convert(v, kind){
+  if (v === undefined || v === null || v === "") return null;
+  switch (kind) {
+    case "arr": {
+      if (Array.isArray(v)) return v.map(String);
+      try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(x => typeof x === "string" ? x : JSON.stringify(x)) : [String(v)]; } catch { return [String(v)]; }
+    }
+    case "arrsplit": { const a = convert(v, "arr"); return a && a.flatMap(x => x.split(/\s*;\s*/)).map(x => x.trim()).filter(Boolean); }
+    case "bool": return v === "__YES__" || v === true || v === 1 || v === "true";
+    case "num": { const n = Number(v); return isFinite(n) ? n : null; }
+    case "date": return String(v).slice(0, 10);
+    case "ts": return String(v);
+    default: return typeof v === "string" ? v : JSON.stringify(v);
+  }
+}
+
+function toRecord(src, row, stamp){
+  const rec = { id: String(row.id), url: row.url ?? null, synced_at: stamp };
+  for (const [n, pg, kind] of src.cols) rec[pg] = convert(row[n], kind);
+  return rec;
+}
+
+function upsertSql(src, records){
+  const json = JSON.stringify(records);
+  let tag = "nt";
+  while (json.includes("$" + tag + "$")) tag += Math.random().toString(36).slice(2, 6);
+  const cols = ["url", "synced_at", ...src.cols.map(c => c[1])];
+  const q = c => '"' + c + '"';
+  return `insert into public.${src.table} select * from jsonb_populate_recordset(null::public.${src.table}, $${tag}$${json}$${tag}$::jsonb) ` +
+    `on conflict (id) do update set ${cols.map(c => `${q(c)} = excluded.${q(c)}`).join(", ")}`;
+}
+
+const $ = s => document.querySelector(s);
+const state = {}; let running = false, stopFlag = false, mcpP = null;
+const VIEW_OF = { snapshot: "v_local_snapshot, local_snapshot + deals, founders, roles, companies, investors", pipeline: "v_raw_data, v_sector_wise_f3", tracxn: "v_tracxn_fund", f3breakup: "v_f3_company_breakup", master: "v_f3_sector_super_master", missing: "v_investor_missing_deals", coverage: "v_out_of_coverage_deals" };
+
+function log(msg, err){ const l = $("#log"); if (l.textContent === "Ready.") l.textContent = ""; const d = document.createElement("div"); if (err) d.className = "e"; const t = new Date().toLocaleTimeString(); d.textContent = `${t}  ${msg}`; l.append(d); l.scrollTop = l.scrollHeight; }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmtN = n => n == null ? "—" : Number(n).toLocaleString("en-IN");
+
+function buildRows(){
+  const tb = $("#rows");
+  for (const s of SOURCES) {
+    const tr = document.createElement("tr"); tr.id = "r-" + s.key;
+    tr.innerHTML = `<td><div class="name"></div><div class="small"></div></td><td><code class="tbl"></code><div class="small vw"></div></td><td class="num nrows">—</td><td class="num srows">—</td><td class="last small">—</td><td><span class="pill st">Not synced</span><div class="prog" hidden><i></i></div><div class="small det"></div></td><td><button type="button" class="one">Sync</button></td>`;
+    tr.querySelector(".name").textContent = s.title;
+    tr.querySelector(".small").textContent = "Views: " + s.views;
+    tr.querySelector(".tbl").textContent = s.table;
+    tr.querySelector(".vw").textContent = VIEW_OF[s.key];
+    tr.querySelector(".one").onclick = () => runSources([s]);
+    tb.append(tr);
+    state[s.key] = {};
+  }
+}
+function ui(s, patch){
+  const tr = $("#r-" + s.key); if (!tr) return;
+  if ("status" in patch) { const p = tr.querySelector(".st"); p.textContent = patch.status; p.className = "pill st " + (patch.cls || ""); }
+  if ("detail" in patch) tr.querySelector(".det").textContent = patch.detail || "";
+  if ("progress" in patch) { const pr = tr.querySelector(".prog"); pr.hidden = patch.progress == null; if (patch.progress != null) pr.firstElementChild.style.width = Math.round(patch.progress * 100) + "%"; }
+  if ("notion" in patch) { state[s.key].notion = patch.notion; tr.querySelector(".nrows").textContent = fmtN(patch.notion); }
+  if ("supa" in patch) { state[s.key].supa = patch.supa; }
+  if ("last" in patch) tr.querySelector(".last").textContent = patch.last ? new Date(patch.last).toLocaleString() : "—";
+  const n = state[s.key].notion, sp = state[s.key].supa, cell = tr.querySelector(".srows");
+  cell.textContent = fmtN(sp); cell.className = "num srows";
+  if (n != null && sp != null) { cell.classList.add("match", n === sp ? "ok" : "bad"); cell.title = n === sp ? "Matches Notion" : "Differs from Notion"; }
+}
+
+function mcpMessage(e, server){
+  switch (e?.code) {
+    case "server_not_connected": case "selection_required": return `${server} isn't connected. Add ${server} in claude.ai Settings → Connectors, then try again.`;
+    case "needs_reauth": return `Your ${server} connection expired. Reconnect ${server} in claude.ai Settings → Connectors.`;
+    case "not_in_manifest": case "not_granted": return `${server} access is turned off for this page. Allow ${server} for this page and try again.`;
+    case "blocked_by_policy": case "approval_required": return `Your organization's policy blocks this ${server} tool here.`;
+    case "capability_disabled": case "capability_removed": return "Connectors aren't available in this view. Open the page in claude.ai.";
+    default: return null;
+  }
+}
+const errText = e => (e?.message || "") + " " + (e?.code || "") + " " + JSON.stringify(e?.result || "") + " " + JSON.stringify(e?.body || "");
+const isRateLimit = e => /rate.?limit|429|too many/i.test(errText(e));
+// Notion timeouts and gateway errors (502/503/504) are temporary: retry them quickly instead of stopping the run.
+const isTransient = e => /\b50[0234]\b|gateway|timed?\s?out|timeout|ECONNRESET|socket hang up|network error|fetch failed|service unavailable/i.test(errText(e));
+
+async function getMcp(){ if (!mcpP) mcpP = (async () => (window.claude?.use ? await window.claude.use("mcp") : null))(); return mcpP; }
+
+/* ---------- Supabase ---------- */
+const MA = "@@ROWS@@", MB = "@@END@@";
+function unwrapRows(res){
+  const c = []; const add = v => { if (v != null) c.push(typeof v === "string" ? v : JSON.stringify(v)); };
+  add(res?.payload); for (const b of (res?.content || [])) if (typeof b?.text === "string") add(b.text); add(res?.structuredContent);
+  for (const s of c) { const i = s.indexOf(MA), j = s.lastIndexOf(MB); if (i < 0 || j <= i) continue; let body = s.slice(i + MA.length, j);
+    for (let k = 0; k < 4; k++) { try { const v = JSON.parse(body); if (Array.isArray(v)) return v; if (typeof v === "string") { body = v; continue; } } catch {} try { body = JSON.parse('"' + body + '"'); } catch { break; } } }
+  throw new Error("Couldn't read Supabase's reply.");
+}
+async function supaExec(mcp, query){ return mcp.callTool(SUPA, SUPA_TOOL, { project_id: PROJECT_ID, query }, { cache: false }); }
+async function supaRows(mcp, select){ return unwrapRows(await supaExec(mcp, `select '${MA}' || coalesce(json_agg(q), '[]'::json)::text || '${MB}' as r from (${select}) q`)); }
+
+/* ---------- Notion ---------- */
+function unwrapNotion(res){
+  const c = []; const add = v => { if (v != null) c.push(v); };
+  add(res?.payload); add(res?.structuredContent); for (const b of (res?.content || [])) if (typeof b?.text === "string") add(b.text);
+  for (let v of c) {
+    for (let k = 0; k < 3 && typeof v === "string"; k++) { try { v = JSON.parse(v); } catch { const i = v.indexOf("{"), j = v.lastIndexOf("}"); if (i >= 0 && j > i) { try { v = JSON.parse(v.slice(i, j + 1)); } catch { break; } } else break; } }
+    if (v && typeof v === "object" && Array.isArray(v.results)) return v.results;
+  }
+  throw new Error("Couldn't read Notion's reply.");
+}
+async function notionQuery(mcp, s, query, onWait){
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      const res = await mcp.callTool(NOTION, NOTION_TOOL, { data: { data_source_urls: [s.ds], query } }, { cache: false });
+      return unwrapNotion(res);
+    } catch (e) {
+      const fatal = mcpMessage(e, NOTION); if (fatal) throw new Error(fatal);
+      if (stopFlag) throw new Error("Stopped");
+      if (isRateLimit(e) || e?.code === "server_unavailable") {
+        const wait = Math.max(35000, e?.retryAfterMs || 0);
+        onWait?.(Math.round(wait / 1000)); await sleep(wait + Math.random() * 3000); continue;
+      }
+      if (isTransient(e) || e?.retryable) { await sleep(5000 * (attempt + 1)); continue; }
+      throw new Error(e?.message || "Notion query failed");
+    }
+  }
+  throw new Error("Notion kept rate-limiting. Try again in a few minutes.");
+}
+
+/* ---------- Deal page content (summary, notes, transcript) ---------- */
+function cleanBlock(t){
+  return String(t || "")
+    .replace(/\s*\[\^[^\]\s]*\]/g, "")                                   // citation markers
+    .replace(/<mention-date start="([^"]+)"[^>]*\/?>(<\/mention-date>)?/g, "$1")
+    .replace(/<mention-[a-z]+[^>]*>([\s\S]*?)<\/mention-[a-z]+>/g, "$1")
+    .replace(/<mention-[a-z]+[^>]*\/>/g, "")
+    .replace(/<empty-block\/>/g, "")
+    .replace(/<\/?[a-z][a-z0-9-]*(\s[^>]*)?\/?>/gi, "")
+    .replace(/\\([~*_$\[\]#>|`-])/g, "$1")
+    .split("\n").map(l => l.replace(/^\t+/, "").replace(/\s+$/, "")).filter(l => l.trim()).join("\n").trim();
+}
+function parseDealPage(pageText){
+  const m = pageText.match(/<content>([\s\S]*)<\/content>/);
+  let content = m ? m[1] : "";
+  const meetings = [];
+  content = content.replace(/<meeting-notes[^>]*>([\s\S]*?)<\/meeting-notes>/g, (_, inner) => {
+    const date = (inner.match(/<mention-date start="(\d{4}-\d{2}-\d{2})/) || [])[1] || null;
+    const pick = tag => { const r = inner.match(new RegExp("<" + tag + "[^>]*>([\\s\\S]*?)</" + tag + ">")); return r ? cleanBlock(r[1]) : ""; };
+    meetings.push({ date, summary: pick("summary"), notes: pick("notes"), transcript: pick("transcript") });
+    return "\n";
+  });
+  meetings.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+  const join = (key, label) => {
+    const parts = meetings.filter(x => x[key]).map(x => (meetings.length > 1 ? `${label} — ${x.date || "undated"}\n` : "") + x[key]);
+    return parts.length ? parts.join("\n\n") : null;
+  };
+  const pageNotes = cleanBlock(content) || null;
+  return {
+    meetings: meetings.length,
+    meeting_dates: meetings.map(x => x.date).filter(Boolean),
+    summary: join("summary", "Meeting"),
+    meeting_notes: join("notes", "Meeting"),
+    transcript: join("transcript", "Meeting"),
+    page_notes: pageNotes
+  };
+}
+function unwrapFetch(res){
+  const c = []; const add = v => { if (v != null) c.push(v); };
+  add(res?.payload); add(res?.structuredContent); for (const b of (res?.content || [])) if (typeof b?.text === "string") add(b.text);
+  for (let v of c) {
+    for (let k = 0; k < 3 && typeof v === "string"; k++) { try { v = JSON.parse(v); } catch { break; } }
+    if (typeof v === "string" && v.includes("<page")) return { text: v, edited: null };
+    if (v && typeof v === "object") {
+      if (typeof v.text === "string" && v.text.includes("<page")) return { text: v.text, edited: v.page_last_edited_at || null };
+      if (v.payload && typeof v.payload.text === "string") return { text: v.payload.text, edited: v.payload.page_last_edited_at || null };
+    }
+  }
+  throw new Error("Couldn't read the Notion page.");
+}
+// Returns the page, null when Notion says it doesn't exist, or { skipped, error } when it keeps timing out.
+async function notionFetch(mcp, id, onWait){
+  let timeouts = 0, withTranscript = true;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const r = unwrapFetch(await mcp.callTool(NOTION, NOTION_FETCH, { id, include_transcript: withTranscript }, { cache: false }));
+      if (!withTranscript) r.noTranscript = true;
+      return r;
+    }
+    catch (e) {
+      const fatal = mcpMessage(e, NOTION); if (fatal) throw new Error(fatal);
+      if (stopFlag) throw new Error("Stopped");
+      if (isRateLimit(e) || e?.code === "server_unavailable") {
+        const wait = Math.max(35000, e?.retryAfterMs || 0);
+        onWait?.(Math.round(wait / 1000)); await sleep(wait + Math.random() * 3000); continue;
+      }
+      if (/not.?found|\b404\b|could not find|restricted/i.test(errText(e))) return null;
+      if (isTransient(e) || e?.retryable) {
+        timeouts++;
+        if (timeouts === 2) withTranscript = false;          // very long transcripts are the usual cause of 504s
+        if (timeouts >= 4) return { skipped: true, error: (e?.message || "Notion timed out").slice(0, 160) };
+        await sleep(4000 * timeouts); continue;
+      }
+      throw new Error(e?.message || "Notion fetch failed");
+    }
+  }
+  return { skipped: true, error: "Notion kept rate-limiting" };
+}
+function contentUpsertSql(recs){
+  const json = JSON.stringify(recs);
+  let tag = "dc"; while (json.includes("$" + tag + "$")) tag += Math.random().toString(36).slice(2, 6);
+  const cols = ["deal", "meeting_dates", "summary", "meeting_notes", "page_notes", "transcript", "meetings", "page_last_edited_at", "fetched_at"];
+  return `insert into public.nt_deal_content (page_id, ${cols.join(", ")}) select page_id, ${cols.join(", ")} from jsonb_populate_recordset(null::public.nt_deal_content, $${tag}$${json}$${tag}$::jsonb) ` +
+    `on conflict (page_id) do update set ${cols.map(c => `${c} = excluded.${c}`).join(", ")}`;
+}
+function cui(patch){
+  if ("status" in patch) { const p = $("#cStatus"); p.textContent = patch.status; p.className = "pill " + (patch.cls || ""); }
+  if ("detail" in patch) $("#cDet").textContent = patch.detail;
+  if ("progress" in patch) $("#cProg").firstElementChild.style.width = Math.round(Math.min(1, patch.progress) * 100) + "%";
+}
+async function contentCounts(mcp){
+  const [r] = await supaRows(mcp, `select (select count(*) from public.nt_deal_pipeline)::int as total, (select count(*) from public.nt_deal_content)::int as done, (select count(*) from public.nt_deal_content where summary is not null)::int as summaries, (select count(*) from public.nt_deal_content where transcript is not null)::int as transcripts`);
+  return r;
+}
+async function syncContent(mcp){
+  const onWait = sec => { cui({ detail: `Notion asked us to slow down — waiting ${sec}s` }); log(`Page content: Notion rate limit, waiting ${sec}s`); };
+  cui({ status: "Reading", cls: "run" });
+  let c = await contentCounts(mcp), fetched = 0, sinceRefresh = 0, buf = [];
+  log(`Page content: ${fmtN(c.done)} of ${fmtN(c.total)} deal pages already read`);
+  const flush = async () => {
+    if (!buf.length) return;
+    try { await supaExec(mcp, contentUpsertSql(buf)); }
+    catch (e) { throw new Error(mcpMessage(e, SUPA) || ("Supabase write failed: " + (e?.message || e?.code))); }
+    buf = [];
+  };
+  const skipped = new Set();
+  while (!stopFlag) {
+    const queue = (await supaRows(mcp, `select * from public.nt_content_queue(${40 + skipped.size})`)).filter(q => !skipped.has(q.id));
+    if (!queue.length) break;
+    for (const q of queue) {
+      if (stopFlag) break;
+      const r = await notionFetch(mcp, q.id, onWait);
+      if (r?.skipped) {
+        skipped.add(q.id);
+        log(`Page content: skipped ${q.deal || q.id} for now, Notion keeps timing out on it (${r.error}). It will be retried on the next run.`, true);
+        continue;
+      }
+      if (r?.noTranscript) log(`Page content: ${q.deal || q.id} saved without its transcript, which was too long for Notion to return in time.`);
+      const parsed = r ? parseDealPage(r.text) : { meetings: 0, meeting_dates: [], summary: null, meeting_notes: null, transcript: null, page_notes: null };
+      buf.push({ page_id: q.id, deal: q.deal, ...parsed, page_last_edited_at: r?.edited || null, fetched_at: new Date().toISOString() });
+      fetched++; sinceRefresh++;
+      if (buf.length >= 5) await flush();
+      if (q.reason === "new") c.done++;
+      cui({ progress: c.done / Math.max(1, c.total), detail: `${fmtN(c.done)} of ${fmtN(c.total)} pages read · ${fmtN(fetched)} this run · last: ${q.deal || q.id}` });
+      await sleep(350);
+    }
+    await flush();
+    if (sinceRefresh >= 300) { sinceRefresh = 0; await refreshBrain(mcp, true); }
+    if (queue.every(q => q.reason === "refresh") && queue.length < 40) break;
+  }
+  await flush();
+  c = await contentCounts(mcp);
+  cui({ status: stopFlag ? "Paused" : "Up to date", cls: stopFlag ? "warn" : "ok", progress: c.done / Math.max(1, c.total),
+        detail: `${fmtN(c.done)} of ${fmtN(c.total)} pages read · ${fmtN(c.summaries)} with meeting summaries · ${fmtN(c.transcripts)} with transcripts` });
+  log(`Page content: ${stopFlag ? "paused" : "done"} — read ${fmtN(fetched)} pages this run; ${fmtN(c.summaries)} summaries and ${fmtN(c.transcripts)} transcripts stored${skipped.size ? `; ${fmtN(skipped.size)} pages skipped after repeated timeouts` : ""}`);
+  return fetched;
+}
+
+/* ---------- Sync one source ---------- */
+async function syncSource(mcp, s){
+  const stamp = new Date().toISOString(), started = Date.now();
+  ui(s, { status: "Counting", cls: "run", progress: 0, detail: "" });
+  const onWait = sec => { ui(s, { detail: `Notion asked us to slow down — waiting ${sec}s` }); log(`${s.title}: Notion rate limit, waiting ${sec}s`); };
+  const [{ n }] = await notionQuery(mcp, s, `SELECT count(*) AS n FROM "${s.ds}"`, onWait);
+  ui(s, { notion: n });
+  log(`${s.title}: ${fmtN(n)} rows in Notion`);
+  let done = 0;
+  const page = s.key === "pipeline" ? 50 : PAGE;
+  for (let off = 0; off < n; off += page) {
+    if (stopFlag) throw new Error("Stopped");
+    ui(s, { status: "Copying", cls: "run", detail: `${fmtN(done)} of ${fmtN(n)}` });
+    const rows = await notionQuery(mcp, s, `SELECT * FROM "${s.ds}" ORDER BY id LIMIT ${page} OFFSET ${off}`, onWait);
+    if (!rows.length) break;
+    const recs = rows.map(r => toRecord(s, r, stamp));
+    try { await supaExec(mcp, upsertSql(s, recs)); }
+    catch (e) { throw new Error(mcpMessage(e, SUPA) || ("Supabase write failed: " + (e?.message || e?.code))); }
+    done += rows.length;
+    ui(s, { progress: Math.min(1, done / n), detail: `${fmtN(done)} of ${fmtN(n)}` });
+    await sleep(900);
+  }
+  let removed = 0;
+  if (done >= n) {
+    const del = await supaRows(mcp, `select public.nt_prune_stale('${s.table}', '${stamp}'::timestamptz) as removed`);
+    removed = del[0]?.removed || 0;
+  }
+  const [{ c }] = await supaRows(mcp, `select count(*)::int as c from public.${s.table}`);
+  const ok = c === n;
+  if (ok && s.after === "rebuild") {
+    ui(s, { status: "Rebuilding", cls: "run", detail: "Updating deals, founders, roles, companies…" });
+    try {
+      const [{ r }] = await supaRows(mcp, `select public.rebuild_snapshot_model() as r`);
+      log(`${s.title}: analysis tables rebuilt — ${fmtN(r.deals)} deals, ${fmtN(r.founders)} founders, ${fmtN(r.roles)} roles, ${fmtN(r.companies)} companies, ${fmtN(r.investors)} investors`);
+    } catch (e) { throw new Error("Copied, but rebuilding the analysis tables failed: " + (mcpMessage(e, SUPA) || e?.message || e?.code)); }
+  }
+  await supaExec(mcp, `insert into public.nt_sync_runs(source, started_at, finished_at, rows_synced, rows_removed, ok, error) values ('${s.key}', '${new Date(started).toISOString()}', now(), ${done}, ${removed}, ${ok}, ${ok ? "null" : "'row count differs'"})`);
+  ui(s, { supa: c, last: Date.now(), progress: null, status: ok ? "Synced" : "Check counts", cls: ok ? "ok" : "warn", detail: `${fmtN(done)} copied${removed ? `, ${fmtN(removed)} removed` : ""} · ${Math.round((Date.now() - started) / 1000)}s` });
+  log(`${s.title}: done — ${fmtN(done)} copied, ${fmtN(removed)} removed, Supabase now has ${fmtN(c)}${ok ? " (matches Notion)" : " (differs from Notion)"}`);
+}
+
+async function runSources(list){
+  if (running) return;
+  const mcp = await getMcp();
+  if (!mcp) { banner("Connectors aren't available in this view. Open this page in claude.ai with Notion and Supabase connected."); return; }
+  running = true; stopFlag = false; setBusy(true); banner(null);
+  let anyOk = false;
+  for (const s of list) {
+    if (stopFlag) break;
+    try { await syncSource(mcp, s); anyOk = true; }
+    catch (e) {
+      const msg = e?.message || String(e);
+      ui(s, { status: msg === "Stopped" ? "Stopped" : "Failed", cls: msg === "Stopped" ? "warn" : "bad", progress: null, detail: msg === "Stopped" ? "" : msg });
+      log(`${s.title}: ${msg}`, msg !== "Stopped");
+      if (/connect|turned off|policy|expired|isn't available/i.test(msg)) { banner(msg); break; }
+    }
+  }
+  if (list.length > 1 && !stopFlag) {
+    try { await syncContent(mcp); anyOk = true; }
+    catch (e) { cui({ status: "Failed", cls: "bad" }); log("Page content: " + (e?.message || e), true); }
+  }
+  if (anyOk && !stopFlag) await refreshBrain(mcp);
+  running = false; setBusy(false);
+}
+
+// Rebuild the linked documents for vector search, then embed whatever changed
+async function refreshBrain(mcp, docsOnly){
+  try {
+    log("Semantic memory: rebuilding documents from all views…");
+    // The rebuild runs as a background job in the database (a direct call can outlast the 2-minute request limit).
+    const [{ q }] = await supaRows(mcp, `select public.brain_request_refresh() as q`);
+    const reqAt = (typeof q === "string" ? JSON.parse(q) : q).requested_at;
+    const t0 = Date.now(); let res = null;
+    while (!res) {
+      if (stopFlag) { log("Semantic memory: the rebuild keeps running in the background."); return; }
+      if (Date.now() - t0 > 20 * 60000) throw new Error("the background rebuild hasn't finished after 20 minutes; it may still complete on its own");
+      await sleep(10000);
+      let lr = null;
+      try { const [{ v }] = await supaRows(mcp, `select value as v from public.brain_config where key = 'last_refresh'`); lr = v ? JSON.parse(v) : null; } catch { continue; }
+      if (lr && new Date(lr.requested_at) >= new Date(reqAt)) res = lr;
+      else $("#hint").textContent = `Rebuilding search documents in the background… ${Math.round((Date.now() - t0) / 1000)}s`;
+    }
+    $("#hint").textContent = "Keep this page open while it runs.";
+    if (!res.ok) throw new Error(res.error || "rebuild failed");
+    log(`Semantic memory: ${fmtN(res.total)} documents (${fmtN(res.inserted)} new, ${fmtN(res.updated)} changed, ${fmtN(res.deleted)} removed) in ${res.seconds}s; ${fmtN(res.pending_embedding)} to embed`);
+    if (docsOnly) return;
+    let remaining = res.pending_embedding, fails = 0, total = remaining;
+    while (remaining > 0 && !stopFlag) {
+      try {
+        const [{ e }] = await supaRows(mcp, `select public.brain_embed_pending(20) as e`);
+        const er = typeof e === "string" ? JSON.parse(e) : e;
+        remaining = er.remaining ?? 0; fails = 0;
+        $("#hint").textContent = `Embedding… ${fmtN(total - remaining)} of ${fmtN(total)}`;
+      } catch (err) {
+        if (++fails >= 5) throw err;
+        await sleep(1500);
+      }
+    }
+    $("#hint").textContent = "Keep this page open while it runs.";
+    log(remaining > 0 ? `Semantic memory: paused with ${fmtN(remaining)} left to embed` : "Semantic memory: up to date");
+  } catch (e) { log("Semantic memory refresh failed: " + (mcpMessage(e, SUPA) || e?.message || e?.code), true); }
+}
+
+async function refreshSupabase(){
+  const mcp = await getMcp(); if (!mcp) return;
+  try {
+    const parts = SOURCES.map(s => `select '${s.key}' as k, (select count(*) from public.${s.table})::int as c, (select max(finished_at) from public.nt_sync_runs where source='${s.key}') as last`).join(" union all ");
+    for (const r of await supaRows(mcp, parts)) { const s = SOURCES.find(x => x.key === r.k); if (s) ui(s, { supa: r.c, last: r.last }); }
+  } catch (e) { const m = mcpMessage(e, SUPA); if (m) banner(m); else log("Couldn't read Supabase counts: " + (e?.message || e?.code), true); }
+}
+
+async function compareCounts(){
+  if (running) return;
+  const mcp = await getMcp(); if (!mcp) { banner("Connectors aren't available in this view. Open this page in claude.ai."); return; }
+  running = true; setBusy(true);
+  await refreshSupabase();
+  for (const s of SOURCES) {
+    if (stopFlag) break;
+    try { const [{ n }] = await notionQuery(mcp, s, `SELECT count(*) AS n FROM "${s.ds}"`, sec => log(`Notion rate limit, waiting ${sec}s`)); ui(s, { notion: n }); await sleep(1500); }
+    catch (e) { log(`${s.title}: ${e.message}`, true); if (/connect|turned off|policy|expired/i.test(e.message)) { banner(e.message); break; } }
+  }
+  running = false; setBusy(false);
+}
+
+function banner(t){ const b = $("#banner"); b.hidden = !t; b.textContent = t || ""; }
+function setBusy(b){ $("#syncAll").disabled = b; $("#check").disabled = b; $("#brain").disabled = b; $("#contentBtn").disabled = b; $("#stop").hidden = !b; document.querySelectorAll(".one").forEach(x => x.disabled = b); }
+
+buildRows();
+$("#syncAll").onclick = () => runSources(SOURCES);
+$("#check").onclick = compareCounts;
+$("#contentBtn").onclick = async () => {
+  if (running) return;
+  const mcp = await getMcp(); if (!mcp) { banner("Connectors aren't available in this view. Open this page in claude.ai with Notion and Supabase connected."); return; }
+  running = true; stopFlag = false; setBusy(true); banner(null);
+  try { const n = await syncContent(mcp); if (n && !stopFlag) await refreshBrain(mcp); }
+  catch (e) { cui({ status: "Failed", cls: "bad" }); const msg = e?.message || String(e); log("Page content: " + msg, msg !== "Stopped"); if (/connect|turned off|policy|expired/i.test(msg)) banner(msg); }
+  running = false; setBusy(false);
+};
+$("#brain").onclick = async () => {
+  if (running) return;
+  const mcp = await getMcp(); if (!mcp) { banner("Connectors aren't available in this view. Open this page in claude.ai."); return; }
+  running = true; stopFlag = false; setBusy(true); await refreshBrain(mcp); running = false; setBusy(false);
+};
+$("#stop").onclick = () => { stopFlag = true; log("Stopping after the current step…"); };
+refreshSupabase();
+(async () => { const mcp = await getMcp(); if (!mcp) return; try { const c = await contentCounts(mcp); cui({ status: c.done >= c.total && c.total ? "Up to date" : (c.done ? "Partly read" : "Not started"), cls: c.done >= c.total && c.total ? "ok" : "", progress: c.done / Math.max(1, c.total), detail: `${fmtN(c.done)} of ${fmtN(c.total)} pages read · ${fmtN(c.summaries)} with meeting summaries · ${fmtN(c.transcripts)} with transcripts` }); } catch {} })();
+</script>
