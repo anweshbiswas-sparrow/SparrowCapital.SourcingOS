@@ -8,7 +8,7 @@ import { createRemoteJWKSet, jwtVerify } from "npm:jose@5.9.6";
 // The page only ever talks to this function; it never gets database or AI credentials.
 // Access: Google sign-in (Supabase Auth) + invite-only list in public.app_users; admins manage it via admin_* actions.
 
-const MAX_ROWS = 2000; // rows returned to the page (table + CSV); the AI itself only sees the first 80
+const MAX_ROWS = 10000; // rows returned to the page (table + CSV); the AI itself only sees the first 80
 const MAX_STEPS = 6;
 
 const db = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 4, idle_timeout: 20, connect_timeout: 10 });
