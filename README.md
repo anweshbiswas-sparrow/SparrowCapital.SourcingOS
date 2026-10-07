@@ -24,6 +24,7 @@ Team web app (web/index.html, hosted on Netlify) ──► Edge Function `ask`
 |---|---|
 | `web/index.html` | Team chat app (single file): Google sign-in, invite-only. Chat at `/`. Admin panel is a separate page at `/admin` (admins only; not linked from the chat). |
 | `web/_redirects` | Netlify rewrite so `/admin` serves the app. |
+| `web/_headers` | Security headers for the site. |
 | `supabase/functions/ask` | Question-answering backend: AI provider (Gemini or OpenAI, with fallback), SQL sandbox, quotas, feedback. |
 | `supabase/functions/nt-sync` | Nightly Notion → Supabase sync, one data source per call, via the official Notion API. |
 | `supabase/functions/brain-embed` | Embeddings for the memory (built-in `gte-small`, no external key). |
@@ -45,7 +46,18 @@ Set in **Supabase → Edge Functions → Secrets**:
 | `NOTION_TOKEN` | `nt-sync` (Notion internal integration "AB"; each database must be shared with it) |
 
 Internal shared secrets (`embed_secret`, `embed_jwt`) live in the `brain_config` table and are not in this repo.
-`web/index.html` contains only the project URL and the public anon key, which can call the `ask` function and nothing else.
+`web/index.html` contains only the project URL and the public anon key. That key is meant to be public: it has no access to any table or database function (`supabase/sql/07_lockdown.sql`), so it can only be used to sign in and to call the `ask` function, which checks the person's Google sign-in and the invite list on every request.
+
+The Google OAuth client secret lives only in Supabase (Authentication → Sign In / Providers → Google). The client ID is public by design (it appears in the Google sign-in URL).
+
+## Security model
+
+- **Secrets** (AI keys, Notion token, Google client secret, internal shared secret) are only in Supabase. None are in this repo, its history, or the web page.
+- **Public roles** (`anon`, and any Google account that signs in) have no direct access to tables or functions. Row-level security is on for every table as a second layer.
+- **The `ask` function** checks the sign-in token and the invite list (`app_users`) on every call; `admin_*` actions also require the admin role.
+- **AI-written SQL** runs as `ask_reader` in a read-only transaction with a 25s timeout. `ask_reader` can read deal data only. It cannot read settings, secrets, users, logs, feedback, sign-in accounts or storage, cannot write, and cannot make web requests.
+- **Internal endpoints** (`nt-sync`, `brain-embed`, `ai-models`, and `ask` selftest) require the internal shared secret.
+- **Web page** is served with strict security headers (`web/_headers`): it can't be framed by other sites, and it can only load scripts from itself and jsDelivr and only send data to this Supabase project.
 
 ## Settings (no redeploy needed)
 

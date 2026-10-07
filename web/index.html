@@ -6,8 +6,14 @@
 <title>Deal Brain</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f6f5c'/%3E%3Cpath d='M9 22V10h6.5a5.5 5.5 0 0 1 0 11H9' fill='none' stroke='white' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://gdxufeytlxadbfzaorrx.supabase.co" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Font loads without blocking the first paint (system font shows until it arrives). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+<!-- Sign-in library as one file (the +esm build pulled in a chain of sub-modules one after another). -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root{
   --bg:#f7f6f2; --panel:#ffffff; --ink:#1d1d1b; --muted:#6b6a64; --faint:#9a988f; --line:#e6e3da; --soft:#f0eee7;
@@ -310,7 +316,7 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
 </div>
 <div class="toast" id="toast"></div>
 <script type="module">
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+const { createClient } = window.supabase; // loaded by the deferred script in <head>, which runs before this module
 // ---- Config: Supabase project + public anon key (used only for sign-in). Every request to "ask" carries the signed-in user's token. ----
 const SUPABASE_URL = "https://gdxufeytlxadbfzaorrx.supabase.co";
 const API = SUPABASE_URL + "/functions/v1/ask";
@@ -342,13 +348,24 @@ function fmtNum(v){ if (typeof v !== "number") return esc(v ?? ""); return Numbe
 function saveChats(){ store.set(chatKey, chats.slice(0, 40)); store.set(curKey, currentId); }
 const current = () => chats.find(c => c.id === currentId);
 
+const READ_ACTIONS = new Set(["me", "admin_overview", "admin_activity", "admin_training", "admin_users", "admin_corrections", "admin_settings"]);
+const dataCache = new Map(); // admin views: show what we have instantly, refresh in the background
+function cget(body, maxAge = 60_000){
+  const k = JSON.stringify(body), hit = dataCache.get(k);
+  if (hit && Date.now() - hit.at < maxAge) return hit.p;
+  const p = call(body); dataCache.set(k, { at: Date.now(), p });
+  p.catch(() => dataCache.delete(k));
+  return p;
+}
 async function call(body){
+  if (!READ_ACTIONS.has(body.action || "ask") && String(body.action || "").startsWith("admin_")) dataCache.clear();
   const { data } = await sb.auth.getSession(); session = data.session;
   if (!session) { showGate("login"); throw new Error("Please sign in."); }
   const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + session.access_token, "apikey": ANON },
     body: JSON.stringify(body) });
   let j = {}; try { j = await r.json(); } catch {}
   if (!r.ok) {
+    if (r.status === 401 || r.status === 403) { try { localStorage.removeItem(meKey(session?.user?.email)); } catch {} }
     if (r.status === 401) showGate("login", j.error);
     else if (j.code === "not_invited" || j.code === "blocked") showGate("denied", j.error);
     const e = new Error(j.error || (r.status === 429 ? "Daily limit reached." : "Couldn't reach Deal Brain. Check your connection and try again.")); e.status = r.status; throw e;
@@ -560,14 +577,31 @@ function showGate(kind, msg){
   }
 }
 function initials(n){ return String(n || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join(""); }
+// Last known profile per account, so returning users see the app instantly while access is re-checked.
+const meKey = email => "db_me:" + String(email || "").toLowerCase();
 async function enterApp(){
+  const email = session?.user?.email;
+  const cached = store.get(meKey(email), null);
+  if (IS_ADMIN_PAGE) cget({ action: "admin_overview", days: ovDays }).catch(() => {}); // start loading alongside the access check
+  if (cached?.user?.email) {
+    applyMe(cached, true);
+    call({ action: "me" }).then(m => { store.set(meKey(email), m); applyMe(m, false); }).catch(() => {});
+    return;
+  }
   showGate("loading", "Checking your access…");
   let m;
   try { m = await call({ action: "me" }); } catch { return; }
+  store.set(meKey(email), m);
+  applyMe(m, true);
+}
+let booted = false;
+function applyMe(m, first){
+  const roleChanged = me && me.role !== m.user.role;
   me = m.user;
   const meHtml = `${me.avatar ? `<img src="${esc(me.avatar)}" alt="" referrerpolicy="no-referrer">` : `<div class="av">${esc(initials(me.name || me.email))}</div>`}<span title="${esc(me.email)}">${esc(me.name || me.email)}</span><button class="linkbtn" data-signout>Sign out</button>`;
   if (IS_ADMIN_PAGE) {
     if (me.role !== "admin") {
+      $("#app").hidden = true; $("#adminpage").hidden = true; $("#gate").hidden = false;
       $("#gatebox").innerHTML = `${LOGO}<h1>Admins only</h1><p>${esc(me.email)} doesn't have admin access. Ask an admin if you need it.</p>
         <a class="gbtn" href="/" style="text-decoration:none">Go to Deal Brain chat</a>
         <small><button class="linkbtn" id="gswitch">Use a different Google account</button></small>`;
@@ -575,24 +609,32 @@ async function enterApp(){
       return;
     }
     $("#ame").innerHTML = meHtml;
-    $("#ame [data-signout]").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+    $("#ame [data-signout]").onclick = signOut;
     $("#gate").hidden = true; $("#adminpage").hidden = false;
-    loadTab();
+    if (!booted || roleChanged) { booted = true; loadTab().then(prefetchTabs); }
     return;
   }
+  if (booted && !roleChanged) { // background refresh: only update the small bits
+    showMeta(m); $("#me").innerHTML = meHtml; $("#me [data-signout]").onclick = signOut; return;
+  }
+  booted = true;
   chatKey = "db_chats:" + me.email; curKey = "db_current:" + me.email;
   chats = store.get(chatKey, []); currentId = store.get(curKey, null);
   chats.forEach(c => c.turns = c.turns.filter(t => t.res || t.error).map(t => ({ ...t, el: null, pending: false })));
   $("#gate").hidden = true; $("#app").hidden = false;
   $("#me").innerHTML = meHtml;
-  $("#me [data-signout]").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+  $("#me [data-signout]").onclick = signOut;
+  showMeta(m);
+  renderSide(); renderThread();
+}
+function showMeta(m){
   const at = m.meta?.data_as_of; const stale = at && (Date.now() - new Date(at)) > 3 * 864e5;
   $("#asof").innerHTML = `<span class="dot ${stale ? "stale" : ""}"></span>Data as of ${esc(fmtDate(at))}`;
   $("#asof").title = `${(m.meta?.deals || 0).toLocaleString()} deals · ${(m.meta?.with_transcript || 0).toLocaleString()} call transcripts`;
   showQuota(m.quota);
   $("#banner").innerHTML = m.ready ? "" : `<div class="banner">Deal Brain is paused or being set up, so it can't answer questions right now.</div>`;
-  renderSide(); renderThread();
 }
+async function signOut(){ try { localStorage.removeItem(meKey(me?.email)); } catch {} await sb.auth.signOut(); location.reload(); }
 sb.auth.onAuthStateChange((ev, sess) => {
   session = sess;
   if (ev === "SIGNED_OUT") showGate("login");
@@ -612,13 +654,17 @@ let ovDays = 30;
 function goTab(t){ adminTab = t; $("#atabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.tab === t)); loadTab(); }
 $("#atabs").onclick = e => { const b = e.target.closest("[data-tab]"); if (b) goTab(b.dataset.tab); };
 const ago = iso => { if (!iso) return "never"; const s = (Date.now() - new Date(iso)) / 1000; if (s < 90) return "just now"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return Math.round(s / 86400) + " d ago"; };
+function prefetchTabs(){ // warm the other tabs so switching is instant
+  [{ action: "admin_activity", ...actState, limit: 30 }, { action: "admin_training" }, { action: "admin_users" }, { action: "admin_corrections" }, { action: "admin_settings" }]
+    .forEach(b => cget(b).catch(() => {}));
+}
 async function loadTab(){
   const p = $("#apane"); p.innerHTML = `<div class="thinking"><span class="pulse"></span><span>Loading…</span></div>`;
   try { await ({ overview: tabOverview, activity: tabActivity, training: tabTraining, users: tabUsers, corrections: tabCorrections, settings: tabSettings })[adminTab](p); }
   catch (e) { p.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
 }
 async function tabUsers(p){
-  const { users } = await call({ action: "admin_users" });
+  const { users } = await cget({ action: "admin_users" });
   p.innerHTML = `<div class="card"><h3>Invite someone</h3>
     <form class="frow" id="invite"><input type="email" name="email" placeholder="name@company.com (their Google account email)" required>
     <input name="name" placeholder="Name (optional)" style="width:170px"><select name="role"><option value="member">Member</option><option value="admin">Admin</option></select>
@@ -671,7 +717,7 @@ function barChart(series, keys, labelKey, opts = {}){
 function kpi(v, label, sub, cls = ""){ return `<div class="kpi ${cls}"><b>${v}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ""}</div>`; }
 
 async function tabOverview(p){
-  const o = await call({ action: "admin_overview", days: ovDays });
+  const o = await cget({ action: "admin_overview", days: ovDays });
   const k = o.kpis, rated = k.up + k.down;
   p.innerHTML = `<div class="ahead2"><h3>Last ${o.days} days</h3><div class="seg" id="ovrange">${[7, 30, 90].map(d => `<button data-d="${d}" class="${d === ovDays ? "on" : ""}">${d} days</button>`).join("")}</div></div>
     <div class="kpis">
@@ -714,7 +760,7 @@ function activityItem(r){
     </div></details>`;
 }
 async function tabActivity(p){
-  const first = await call({ action: "admin_activity", ...actState, limit: 30 });
+  const first = await cget({ action: "admin_activity", ...actState, limit: 30 });
   const S = [["all", "All"], ["answered", "Answered"], ["failed", "Failed"], ["up", "Upvoted"], ["down", "Downvoted"], ["unrated", "Not rated"]];
   p.innerHTML = `<div class="card"><div class="filters">
       <label class="sr" for="afuser">Person</label><select id="afuser"><option value="">Everyone</option>${first.users.map(u => `<option ${u === actState.user ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>
@@ -745,7 +791,7 @@ const EV = {
   correction_dismissed: ["Downvote dismissed", "", "No change to the brain."],
 };
 async function tabTraining(p){
-  const t = await call({ action: "admin_training" });
+  const t = await cget({ action: "admin_training" });
   const T = t.totals;
   const KN = { transcript: "Call transcripts", call_notes: "Call notes", deal: "Deals", call_summary: "Call summaries", funding_round: "Funding rounds (Tracxn)", founder: "Founders", investor_f3_breakup: "F3 investor breakup", f3_master: "F3 master", alumni_pattern: "Alumni patterns", investor_missed: "Investors missed", out_of_coverage: "Out of coverage", answer_example: "Worked examples (from upvotes)", insight: "Saved insights" };
   const kmax = Math.max(1, ...t.kinds.map(x => x.n));
@@ -771,7 +817,7 @@ async function tabTraining(p){
   const gc = $("#gocorr"); if (gc) gc.onclick = () => goTab("corrections");
 }
 async function tabCorrections(p){
-  const { items, rules } = await call({ action: "admin_corrections" });
+  const { items, rules } = await cget({ action: "admin_corrections" });
   const pending = items.filter(i => i.status === "pending");
   p.innerHTML = `<div class="card"><h3>${pending.length} correction${pending.length === 1 ? "" : "s"} to review</h3>
       <p class="muted" style="margin-top:0">When someone gives 👎 with a note, it lands here. Approving turns your wording into a team rule the AI follows on every answer.</p>
@@ -792,7 +838,7 @@ async function tabCorrections(p){
   $("#addrule").onsubmit = async e => { e.preventDefault(); const r = new FormData(e.target).get("rule"); try { await call({ action: "admin_rule_add", rule: r }); toast("Rule added."); loadTab(); } catch (er) { toast(er.message); } };
 }
 async function tabSettings(p){
-  const { settings: st, keys, meta, syncs } = await call({ action: "admin_settings" });
+  const { settings: st, keys, meta, syncs } = await cget({ action: "admin_settings" });
   p.innerHTML = `<div class="card"><h3>App</h3><form class="set" id="setf">
       <label>Deal Brain is</label><select name="enabled"><option value="true" ${st.enabled !== false ? "selected" : ""}>On: team can ask questions</option><option value="false" ${st.enabled === false ? "selected" : ""}>Paused</option></select>
       <label>AI provider</label><select name="provider"><option value="gemini" ${st.provider !== "openai" ? "selected" : ""}>Google Gemini ${keys.gemini ? "" : "(no key set)"}</option><option value="openai" ${st.provider === "openai" ? "selected" : ""}>OpenAI ${keys.openai ? "" : "(no key set)"}</option></select>

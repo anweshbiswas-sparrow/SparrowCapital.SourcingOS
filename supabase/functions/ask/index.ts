@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import postgres from "npm:postgres@3.4.5";
+import { createRemoteJWKSet, jwtVerify } from "npm:jose@5.9.6";
 
 // Deal Brain team app backend.
 // Plain-English question -> AI (Gemini or OpenAI) writes read-only SQL -> run as role ask_reader in a READ ONLY
@@ -31,6 +32,7 @@ const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400", // browsers skip the extra preflight request for a day
 };
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -113,7 +115,8 @@ const TOOLS = [{
 
 function promptFor(prefetch: any, SCHEMA: string, RULES: string) {
   const today = new Date().toISOString().slice(0, 10);
-  let s = `Today's date is ${today}.\n\nYou are Deal Brain, an analyst for Sparrow VC's deal pipeline, answering teammates in a web app. Answer using the run_sql tool against this database:\n\n${SCHEMA}\n\n${RULES}`;
+  // Stable text first (schema + rules) so the AI provider can reuse its prompt cache; per-question parts after.
+  let s = `You are Deal Brain, an analyst for Sparrow VC's deal pipeline, answering teammates in a web app. Answer using the run_sql tool against this database:\n\n${SCHEMA}\n\n${RULES}\n\nToday's date is ${today}.`;
   const rules = prefetch?.rules || [];
   if (rules.length) s += "\n\nTEAM RULES (always follow):\n" + rules.map((r: string) => "- " + r).join("\n");
   const mem = prefetch?.memory || [];
@@ -130,9 +133,22 @@ const toolPayload = (t: any) => {
   return s;
 };
 
+// Question embeddings are computed here (built-in gte-small, same settings as brain-embed) and put in the
+// query cache, so brain_search inside brain_prefetch doesn't make a slow database -> function round trip.
+let embedder: any = null;
+async function warmQueryEmbedding(q: string) {
+  try {
+    embedder ??= new (globalThis as any).Supabase.ai.Session("gte-small");
+    const e: number[] = await embedder.run(q.slice(0, 1500), { mean_pool: true, normalize: true });
+    await db`insert into brain_qcache as c (q, embedding) values (lower(btrim(regexp_replace(${q}, '[[:space:]]+', ' ', 'g'))), ${JSON.stringify(e)}::extensions.vector)
+             on conflict (q) do update set used_at = now()`;
+  } catch (e) { console.error("embed", e); } // falls back to the database path
+}
 async function answer(question: string, history: any[], deep: boolean, settings: any) {
-  const prefetch = await db`select public.brain_prefetch(${question}) as c`.then((r: any) => r[0]?.c).catch(() => null);
-  const pp = await promptParts();
+  const [prefetch, pp] = await Promise.all([
+    warmQueryEmbedding(question).then(() => db`select public.brain_prefetch(${question}) as c`).then((r: any) => r[0]?.c).catch(() => null),
+    promptParts(),
+  ]);
   const messages: any[] = [{ role: "system", content: promptFor(prefetch, pp.schema, pp.rules) }];
   for (const h of (history || []).slice(-6)) {
     if (h?.q) messages.push({ role: "user", content: String(h.q).slice(0, 1000) });
@@ -204,23 +220,50 @@ async function sourcesFor(text: string, table: any) {
 // ---------- Auth: Google sign-in via Supabase Auth, invite-only (public.app_users) ----------
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+// Sign-in tokens are ES256-signed; checking them locally against the project's public keys avoids a call to
+// the auth server on every request. Falls back to asking the auth server if local checking fails.
+const JWKS = createRemoteJWKSet(new URL(`${SUPABASE_URL}/auth/v1/.well-known/jwks.json`), { cacheMaxAge: 6 * 3600_000 });
+async function tokenUser(token: string): Promise<any | null> {
+  try {
+    const { payload }: any = await jwtVerify(token, JWKS, { issuer: `${SUPABASE_URL}/auth/v1`, audience: "authenticated" });
+    if (payload.role === "authenticated" && payload.email) return { email: payload.email, user_metadata: payload.user_metadata || {} };
+    return null;
+  } catch (e: any) {
+    if (e?.code === "ERR_JWT_EXPIRED") return null;
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } });
+    return r.ok ? await r.json() : null;
+  }
+}
 async function currentUser(req: Request) {
   const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   if (!token) return { error: "Please sign in.", code: "signed_out" };
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } });
-  if (!r.ok) return { error: "Your session has expired. Please sign in again.", code: "signed_out" };
-  const u = await r.json();
+  const u = await tokenUser(token);
+  if (!u) return { error: "Your session has expired. Please sign in again.", code: "signed_out" };
   const email = String(u?.email || "").toLowerCase();
   if (!email) return { error: "Please sign in.", code: "signed_out" };
-  const [row] = await db`update app_users set last_seen = now(), name = coalesce(name, ${u?.user_metadata?.full_name ?? null})
-                         where email = ${email} returning email, name, role, status, daily_limit`;
+  // One round trip: read the user, and touch last_seen at most once a minute.
+  const [row] = await db`with t as (update app_users set last_seen = now(), name = coalesce(name, ${u?.user_metadata?.full_name ?? null})
+                           where email = ${email} and (last_seen is null or last_seen < now() - interval '1 minute' or name is null) returning 1)
+                         select email, name, role, status, daily_limit, (select count(*) from t) touched from app_users where email = ${email}`;
   if (!row) return { error: `${email} hasn't been invited to Deal Brain. Ask an admin to add you.`, code: "not_invited", email };
   if (row.status !== "active") return { error: "Your access has been paused. Ask an admin.", code: "blocked", email };
-  return { user: { ...row, avatar: u?.user_metadata?.avatar_url ?? null } };
+  const { touched: _t, ...user } = row;
+  return { user: { ...user, avatar: u?.user_metadata?.avatar_url ?? null } };
 }
-async function settings() {
+let settingsCache: { at: number; v: any } | null = null;
+async function settings(fresh = false) {
+  if (!fresh && settingsCache && Date.now() - settingsCache.at < 30_000) return settingsCache.v;
   const [s] = await db`select value::jsonb v from brain_config where key = 'ask_settings'`;
-  return s?.v || {};
+  settingsCache = { at: Date.now(), v: s?.v || {} };
+  return settingsCache.v;
+}
+// "Data as of" and deal counts only change with the sync, so keep them for 5 minutes.
+let metaCache: { at: number; v: any } | null = null;
+async function meta() {
+  if (metaCache && Date.now() - metaCache.at < 300_000) return metaCache.v;
+  const [m] = await db`select public.ask_meta() m`;
+  metaCache = { at: Date.now(), v: m.m };
+  return metaCache.v;
 }
 async function quotaFor(user: any, s: any) {
   const [c] = await db`select count(*) filter (where user_email = ${user.email})::int mine, count(*)::int team
@@ -348,10 +391,9 @@ async function admin(action: string, body: any, me: any) {
       return { ok: true };
     }
     case "admin_settings": {
-      const s = await settings();
-      const [m] = await db`select public.ask_meta() m`;
-      const runs = await db`select distinct on (source) source, finished_at, ok, rows_synced, error from nt_sync_runs order by source, finished_at desc`;
-      return { settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, s[k] ?? null])), keys: { gemini: !!PROVIDERS.gemini.key, openai: !!PROVIDERS.openai.key }, meta: m.m, syncs: runs };
+      const [s, m, runs] = await Promise.all([settings(true), meta(),
+        db`select distinct on (source) source, finished_at, ok, rows_synced, error from nt_sync_runs order by source, finished_at desc`]);
+      return { settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, s[k] ?? null])), keys: { gemini: !!PROVIDERS.gemini.key, openai: !!PROVIDERS.openai.key }, meta: m, syncs: runs };
     }
     case "admin_settings_save": {
       const s = await settings(); const p = body.settings || {}; const out: any = { ...s };
@@ -362,6 +404,7 @@ async function admin(action: string, body: any, me: any) {
       for (const k of ["per_client_day", "global_day"]) if (p[k] !== undefined && p[k] !== "") out[k] = Math.max(0, Math.min(100000, Number(p[k]) | 0));
       for (const k of ["price_in_per_mtok", "price_out_per_mtok"]) if (p[k] !== undefined && p[k] !== "") out[k] = Math.max(0, Number(p[k]) || 0);
       await db`update brain_config set value = ${JSON.stringify(out)} where key = 'ask_settings'`;
+      settingsCache = null;
       return { ok: true };
     }
   }
@@ -380,6 +423,13 @@ Deno.serve(async (req: Request) => {
       // Owner-only check of the SQL sandbox (needs the internal secret; never called by the web page).
       const [sec] = await db`select value from brain_config where key = 'embed_secret'`;
       if (!sec || req.headers.get("x-brain-secret") !== sec.value) return json({ error: "forbidden" }, 403);
+      if (body.timing) {
+        const t: any = {}; let t0 = Date.now();
+        await warmQueryEmbedding(String(body.timing)); t.embed_ms = Date.now() - t0; t0 = Date.now();
+        await db`select public.brain_prefetch(${String(body.timing)}) c`; t.prefetch_ms = Date.now() - t0; t0 = Date.now();
+        await meta(); t.meta_ms = Date.now() - t0; t0 = Date.now(); await meta(); t.meta_cached_ms = Date.now() - t0;
+        return json(t);
+      }
       if (body.probe) {
         // Read-only admin views, for checking a deploy without a signed-in admin.
         const probe: any = {};
@@ -413,8 +463,8 @@ Deno.serve(async (req: Request) => {
 
     if (action === "me") {
       const s = await settings();
-      const [m] = await db`select public.ask_meta() m`;
-      return json({ user: me, quota: await quotaFor(me, s), meta: m.m, ready: !!OPENAI_KEY && s.enabled !== false });
+      const [quota, m] = await Promise.all([quotaFor(me, s), meta()]);
+      return json({ user: me, quota, meta: m, ready: !!OPENAI_KEY && s.enabled !== false });
     }
 
     if (action === "feedback") {
@@ -437,7 +487,7 @@ Deno.serve(async (req: Request) => {
     const question = String(body.question || "").trim().slice(0, 1000);
     if (!question) return json({ error: "Ask a question." }, 400);
     if (!OPENAI_KEY) return json({ error: "No AI key has been added in Supabase yet." }, 503);
-    const s = await settings();
+    const s = await settings(true);
     if (s.enabled === false) return json({ error: "Deal Brain is paused by an admin." }, 503);
     const quota = await quotaFor(me, s);
     if (quota.used >= quota.limit) return json({ error: `Daily limit reached (${quota.limit} questions). It resets over the next 24 hours.` }, 429);
@@ -457,12 +507,11 @@ Deno.serve(async (req: Request) => {
         "Something went wrong answering this. Try again or rephrase.";
       return json({ error: friendly, log_id: log.id }, 502);
     }
-    const sources = await sourcesFor(out.text, out.table);
-    const [meta] = await db`select public.ask_meta() m`;
+    const [sources, m] = await Promise.all([sourcesFor(out.text, out.table), meta()]);
     return json({
       log_id: log.id, answer: out.text, followups: out.followups, sources,
       table: out.table ? { columns: out.table.columns, numeric: out.table.numeric, rows: out.table.rows, truncated: out.table.truncated } : null,
-      sql: out.sqls, ms, model: out.model, data_as_of: meta.m.data_as_of,
+      sql: out.sqls, ms, model: out.model, data_as_of: m.data_as_of,
       quota: { ...quota, used: quota.used + 1 },
     });
   } catch (e: any) {
