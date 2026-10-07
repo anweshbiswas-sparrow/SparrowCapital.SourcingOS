@@ -345,7 +345,11 @@ function esc(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","
 function toast(t){ const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove("on"), 2600); }
 function fmtDate(iso){ if (!iso) return "—"; const d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) + ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); }
 function fmtNum(v){ if (typeof v !== "number") return esc(v ?? ""); return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 2 }); }
-function saveChats(){ store.set(chatKey, chats.slice(0, 40)); store.set(curKey, currentId); }
+// Saved chats keep at most 300 table rows per answer so long lists don't fill the browser's storage.
+function saveChats(){
+  const slim = chats.slice(0, 40).map(c => ({ ...c, turns: c.turns.map(t => t.res?.table?.rows?.length > 300 ? { ...t, el: null, res: { ...t.res, table: { ...t.res.table, rows: t.res.table.rows.slice(0, 300), trimmed: t.res.table.rows.length } } } : { ...t, el: null }) }));
+  store.set(chatKey, slim); store.set(curKey, currentId);
+}
 const current = () => chats.find(c => c.id === currentId);
 
 const READ_ACTIONS = new Set(["me", "admin_overview", "admin_activity", "admin_training", "admin_users", "admin_corrections", "admin_settings"]);
@@ -486,7 +490,7 @@ function paint(t){
   const chart = chartFor(tb, a.clientWidth - 38);
   if (chart) h += `<div class="block chart"><div class="block-h">Chart</div>${chart}</div>`;
   if (tb && tb.rows && tb.rows.length) {
-    h += `<div class="block"><div class="block-h">Data · ${tb.rows.length}${tb.truncated ? "+" : ""} rows<span class="sp"></span><button class="link" data-csv>Download CSV</button></div><div class="tablewrap">${tableHtml(tb, t.sortCol, t.sortDir || 1)}</div></div>`;
+    h += `<div class="block"><div class="block-h">Data · ${(tb.trimmed || tb.rows.length).toLocaleString()}${tb.truncated ? "+" : ""} rows${tb.trimmed ? ` (first ${tb.rows.length} kept in this saved chat)` : ""}<span class="sp"></span><button class="link" data-csv>Download CSV</button></div><div class="tablewrap">${tableHtml(tb, t.sortCol, t.sortDir || 1)}</div></div>`;
   }
   if (r.sources && r.sources.length) h += `<div class="block"><div class="block-h">Open in Notion</div><div class="chips">${r.sources.map(s => `<a class="chip" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.deal)}${s.status ? `<em>${esc(s.status)}</em>` : ""}</a>`).join("")}</div></div>`;
   if (r.followups && r.followups.length) h += `<div class="follow">${r.followups.map(f => `<button data-q="${esc(f)}">${esc(f)}</button>`).join("")}</div>`;

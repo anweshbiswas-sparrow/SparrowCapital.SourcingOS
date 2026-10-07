@@ -8,7 +8,7 @@ import { createRemoteJWKSet, jwtVerify } from "npm:jose@5.9.6";
 // The page only ever talks to this function; it never gets database or AI credentials.
 // Access: Google sign-in (Supabase Auth) + invite-only list in public.app_users; admins manage it via admin_* actions.
 
-const MAX_ROWS = 200;
+const MAX_ROWS = 2000; // rows returned to the page (table + CSV); the AI itself only sees the first 80
 const MAX_STEPS = 6;
 
 const db = postgres(Deno.env.get("SUPABASE_DB_URL")!, { prepare: false, max: 4, idle_timeout: 20, connect_timeout: 10 });
@@ -108,7 +108,7 @@ const TOOLS = [{
   type: "function",
   function: {
     name: "run_sql",
-    description: `Run ONE read-only Postgres SELECT (or WITH ... SELECT) on the fund's database and get rows back as JSON (max ${MAX_ROWS} rows). brain_search(...) and brain_similar(...) can be used inside the query.`,
+    description: `Run ONE read-only Postgres SELECT (or WITH ... SELECT) on the fund's database. You get row_count and the first 80 rows as JSON; the user sees up to ${MAX_ROWS} rows. brain_search(...) and brain_similar(...) can be used inside the query.`,
     parameters: { type: "object", properties: { sql: { type: "string" } }, required: ["sql"] },
   },
 }];
@@ -195,6 +195,15 @@ async function answer(question: string, history: any[], deep: boolean, settings:
       }
       messages.push({ role: "tool", tool_call_id: c.id, content });
     }
+  }
+  // Out of steps (or an empty reply): ask once more for the answer from the results already gathered.
+  if (!text.trim()) {
+    messages.push({ role: "user", content: "Write the final answer now from the query results above, in the required answer format. Do not call any tools." });
+    try {
+      const j = await chat(provider, model, messages, null, effort);
+      tokensIn += j.usage?.prompt_tokens || 0; tokensOut += j.usage?.completion_tokens || 0;
+      text = j.choices?.[0]?.message?.content || "";
+    } catch (_) { /* fall through to the generic message */ }
   }
   // follow-ups line
   let followups: string[] = [];
@@ -423,6 +432,11 @@ Deno.serve(async (req: Request) => {
       // Owner-only check of the SQL sandbox (needs the internal secret; never called by the web page).
       const [sec] = await db`select value from brain_config where key = 'embed_secret'`;
       if (!sec || req.headers.get("x-brain-secret") !== sec.value) return json({ error: "forbidden" }, 403);
+      if (body.ask_test) {
+        // Owner-only end-to-end check of the answer pipeline (not logged, no quota).
+        const out = await answer(String(body.ask_test), body.history || [], !!body.deep, await settings(true));
+        return json({ text: out.text, sqls: out.sqls, columns: out.table?.columns, rows: out.table?.rows?.slice(0, 40), row_count: out.table?.rows?.length, model: out.model, tokensIn: out.tokensIn });
+      }
       if (body.timing) {
         const t: any = {}; let t0 = Date.now();
         await warmQueryEmbedding(String(body.timing)); t.embed_ms = Date.now() - t0; t0 = Date.now();
