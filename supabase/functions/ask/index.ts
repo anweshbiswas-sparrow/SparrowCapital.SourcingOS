@@ -255,21 +255,71 @@ async function admin(action: string, body: any, me: any) {
       await db`with d as (delete from app_users where email = ${email} returning 1) select count(*) from d`;
       return { ok: true };
     }
-    case "admin_usage": {
+    case "admin_overview": {
       const s = await settings();
       const pin = Number(s.price_in_per_mtok ?? 0), pout = Number(s.price_out_per_mtok ?? 0);
-      const days = await db`select to_char(d, 'YYYY-MM-DD') day, coalesce(x.questions, 0)::int questions, coalesce(x.errors, 0)::int errors, coalesce(x.tin, 0)::bigint tokens_in, coalesce(x.tout, 0)::bigint tokens_out
-        from generate_series(current_date - 13, current_date, interval '1 day') d
-        left join (select created_at::date dd, count(*) filter (where error is null) questions, count(*) filter (where error is not null) errors,
-                          sum(tokens_in) tin, sum(tokens_out) tout from ask_log where created_at > current_date - 14 group by 1) x on x.dd = d::date order by d`;
-      const people = await db`select coalesce(user_email, '(before login)') email, count(*) filter (where error is null)::int questions,
-          count(*) filter (where rating = 1)::int up, count(*) filter (where rating = -1)::int down, round(avg(ms) filter (where error is null))::int avg_ms, max(created_at) last
-        from ask_log where created_at > current_date - 30 group by 1 order by 2 desc`;
-      const recent = await db`select id, created_at, coalesce(user_email, client_id) who, question, left(answer, 400) answer, error, rating, ms, model, tokens_in, tokens_out, sqls
-        from ask_log order by id desc limit ${Math.min(200, Number(body.limit) || 50)}`;
-      const [t] = await db`select coalesce(sum(tokens_in), 0)::bigint tin, coalesce(sum(tokens_out), 0)::bigint tout, count(*) filter (where error is null)::int q
-        from ask_log where created_at > date_trunc('month', current_date)`;
-      return { days, people, recent, month: { questions: t.q, tokens_in: Number(t.tin), tokens_out: Number(t.tout), est_cost_usd: Math.round((Number(t.tin) * pin + Number(t.tout) * pout) / 1e4) / 100 } };
+      const n = [7, 30, 90, 365].includes(Number(body.days)) ? Number(body.days) : 30;
+      const since = db`created_at > current_date - ${n - 1}::int`;
+      const [k] = await db`select count(*)::int total, count(*) filter (where error is null)::int answered, count(*) filter (where error is not null)::int failed,
+          count(*) filter (where rating = 1)::int up, count(*) filter (where rating = -1)::int down,
+          count(*) filter (where error is null and rating is null)::int unrated, count(distinct user_email)::int people,
+          round(avg(ms) filter (where error is null))::int avg_ms, coalesce(sum(tokens_in), 0)::bigint tin, coalesce(sum(tokens_out), 0)::bigint tout
+        from ask_log where ${since}`;
+      const days = await db`select to_char(d, 'YYYY-MM-DD') as day, coalesce(x.answered, 0)::int answered, coalesce(x.failed, 0)::int failed, coalesce(x.up, 0)::int up, coalesce(x.down, 0)::int down
+        from generate_series(current_date - ${Math.min(n, 90) - 1}::int, current_date, interval '1 day') d
+        left join (select created_at::date dd, count(*) filter (where error is null) answered, count(*) filter (where error is not null) failed,
+                          count(*) filter (where rating = 1) up, count(*) filter (where rating = -1) down
+                   from ask_log where created_at > current_date - ${Math.min(n, 90)}::int group by 1) x on x.dd = d::date order by d`;
+      const people = await db`select coalesce(l.user_email, '(before login)') email, max(u.name) name, count(*)::int asked, count(*) filter (where l.error is null)::int answered,
+          count(*) filter (where l.error is not null)::int failed, count(*) filter (where l.rating = 1)::int up, count(*) filter (where l.rating = -1)::int down,
+          round(avg(l.ms) filter (where l.error is null))::int avg_ms, max(l.created_at) last
+        from ask_log l left join app_users u on u.email = l.user_email where l.created_at > current_date - ${n - 1}::int group by 1 order by 3 desc`;
+      const failures = await db`select regexp_replace(left(error, 90), '[[:space:]]+', ' ', 'g') as reason, count(*)::int as n, max(created_at) as last
+        from ask_log where error is not null and ${since} group by 1 order by 2 desc limit 8`;
+      return { days: n, kpis: { ...k, tin: undefined, tout: undefined, tokens_in: Number(k.tin), tokens_out: Number(k.tout),
+        est_cost_usd: Math.round((Number(k.tin) * pin + Number(k.tout) * pout) / 1e4) / 100 }, series: days, people, failures };
+    }
+    case "admin_activity": {
+      const lim = Math.min(100, Math.max(10, Number(body.limit) || 30));
+      const before = Number(body.before_id) || null;
+      const who = String(body.user || "").toLowerCase() || null;
+      const q = String(body.q || "").trim().slice(0, 100);
+      const st = String(body.status || "all");
+      const cond = st === "answered" ? db`and error is null` : st === "failed" ? db`and error is not null` : st === "up" ? db`and rating = 1`
+        : st === "down" ? db`and rating = -1` : st === "unrated" ? db`and error is null and rating is null` : db``;
+      const rows = await db`select id, created_at, coalesce(user_email, client_id) who, question, answer, error, rating, correction, correction_status,
+          row_count, ms, model, tokens_in, tokens_out, sqls
+        from ask_log where true ${before ? db`and id < ${before}` : db``} ${who ? db`and user_email = ${who}` : db``}
+          ${q ? db`and (question ilike ${"%" + q + "%"} or answer ilike ${"%" + q + "%"})` : db``} ${cond}
+        order by id desc limit ${lim + 1}`;
+      const users = await db`select distinct user_email email from ask_log where user_email is not null order by 1`;
+      return { rows: rows.slice(0, lim), more: rows.length > lim, users: users.map((u: any) => u.email) };
+    }
+    case "admin_training": {
+      const [t] = await db`select
+          (select count(*) from brain_docs where kind = 'answer_example')::int examples,
+          (select count(*) from brain_docs where kind = 'answer_example' and embedding is null)::int examples_pending,
+          (select count(*) from brain_rules where active)::int rules_active, (select count(*) from brain_rules where not active)::int rules_off,
+          (select count(*) from ask_log where rating = -1 and coalesce(correction_status, 'pending') = 'pending')::int corr_pending,
+          (select count(*) from ask_log where correction_status = 'approved')::int corr_approved,
+          (select count(*) from ask_log where correction_status = 'dismissed')::int corr_dismissed,
+          (select count(*) from brain_docs where kind <> 'answer_example')::int memory_docs,
+          (select max(updated_at) from brain_docs where kind <> 'answer_example') memory_updated`;
+      const weeks = await db`select to_char(w, 'YYYY-MM-DD') as week,
+          (select count(*) from brain_feedback f where f.rating = 1 and date_trunc('week', f.created_at) = w)::int examples,
+          (select count(*) from brain_rules r where date_trunc('week', r.created_at) = w)::int rules,
+          (select count(*) from ask_log l where l.rating = -1 and date_trunc('week', l.created_at) = w)::int downvotes
+        from generate_series(date_trunc('week', current_date) - interval '11 weeks', date_trunc('week', current_date), interval '1 week') w order by w`;
+      const events = await db`select * from (
+          select f.created_at as at, 'example' as type, case when f.chat_id like 'team:%' then substr(f.chat_id, 6) else 'Deal Brain (Claude)' end as who,
+                 f.question as text, null::text as detail from brain_feedback f where f.rating = 1
+          union all
+          select r.created_at, case when r.active then 'rule' else 'rule_off' end, coalesce(substring(r.source from 'by ([^ ]+)$'), r.source), r.rule, r.source from brain_rules r
+          union all
+          select l.created_at, 'correction_' || coalesce(l.correction_status, 'pending'), l.user_email, l.question, l.correction from ask_log l where l.rating = -1
+        ) e order by at desc limit 40`;
+      const kinds = await db`select kind, count(*)::int n from brain_docs group by 1 order by 2 desc`;
+      return { totals: t, weeks, events, kinds };
     }
     case "admin_corrections": {
       const items = await db`select id, created_at, coalesce(user_email, client_id) who, question, left(answer, 600) answer, correction, coalesce(correction_status, 'pending') status
@@ -330,6 +380,15 @@ Deno.serve(async (req: Request) => {
       // Owner-only check of the SQL sandbox (needs the internal secret; never called by the web page).
       const [sec] = await db`select value from brain_config where key = 'embed_secret'`;
       if (!sec || req.headers.get("x-brain-secret") !== sec.value) return json({ error: "forbidden" }, 403);
+      if (body.probe) {
+        // Read-only admin views, for checking a deploy without a signed-in admin.
+        const probe: any = {};
+        for (const [a, b] of [["admin_overview", { days: 30 }], ["admin_activity", { limit: 10 }], ["admin_activity", { status: "failed", limit: 10 }], ["admin_training", {}]] as const) {
+          const key = a + ":" + ((b as any).status || "all");
+          try { probe[key] = await admin(a, b, { email: "selftest" }); } catch (e: any) { probe[key] = { error: String(e.message || e) }; }
+        }
+        return json(probe);
+      }
       const tryq = async (q: string) => { try { const t = await runSql(q); return { ok: true, rows: t.rows.slice(0, 3), columns: t.columns }; } catch (e: any) { return { ok: false, error: String(e.message || e).slice(0, 200) }; } };
       return json({
         read: await tryq("select status, count(*) as deals from v_raw_data group by 1 order by 2 desc"),

@@ -22,7 +22,7 @@ Team web app (web/index.html, hosted on Netlify) ──► Edge Function `ask`
 
 | Path | What it is |
 |---|---|
-| `web/index.html` | Team chat app (single file): Google sign-in, invite-only. Admin panel at `/admin` (admins only). |
+| `web/index.html` | Team chat app (single file): Google sign-in, invite-only. Chat at `/`. Admin panel is a separate page at `/admin` (admins only; not linked from the chat). |
 | `web/_redirects` | Netlify rewrite so `/admin` serves the app. |
 | `supabase/functions/ask` | Question-answering backend: AI provider (Gemini or OpenAI, with fallback), SQL sandbox, quotas, feedback. |
 | `supabase/functions/nt-sync` | Nightly Notion → Supabase sync, one data source per call, via the official Notion API. |

@@ -141,13 +141,18 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
 .me{display:flex;align-items:center;gap:8px}
 .me img,.me .av{width:26px;height:26px;border-radius:50%;background:var(--accent-soft);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--accent);object-fit:cover}
 .me span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-size:13px}
-.adminbtn{margin:0 12px 10px;padding:8px 12px;border:1px solid var(--line);background:none;border-radius:10px;cursor:pointer;display:flex;gap:8px;align-items:center;font-size:14px;color:var(--ink)}
-.adminbtn.on{background:var(--accent-soft);border-color:var(--accent)}
-.adminbtn[hidden]{display:none}
-/* admin */
-.admin{flex:1;overflow:auto;padding:22px 16px 40px}
-.admin[hidden],.chatview[hidden]{display:none}
 .chatview{display:flex;flex-direction:column;flex:1;min-height:0}
+/* admin page (/admin) */
+.adminpage{min-height:100dvh;display:flex;flex-direction:column}
+.adminpage[hidden],.app[hidden]{display:none}
+.ahead{position:sticky;top:0;z-index:4;background:var(--bg);border-bottom:1px solid var(--line)}
+.ahead-in{max-width:1072px;margin:0 auto;display:flex;align-items:center;gap:12px;padding:12px 16px}
+.ahead .brand{padding:0;flex:1;min-width:0}
+.ahead .me{flex:0 1 auto;min-width:0}
+.ahead .me span{max-width:220px}
+.tochat{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:7px 12px;font-size:14px;font-weight:500;color:var(--ink);text-decoration:none;white-space:nowrap}
+.tochat:hover{border-color:var(--accent)}
+.admin{flex:1;padding:22px 16px 40px}
 .awrap{max-width:1040px;margin:0 auto}
 .atabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin:8px 0 18px;overflow-x:auto}
 .atabs button{border:0;background:none;padding:9px 12px;cursor:pointer;color:var(--muted);font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
@@ -181,7 +186,53 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
 .set{display:grid;grid-template-columns:220px 1fr;gap:10px 16px;align-items:center}
 .set label{color:var(--muted);font-size:13px}
 .muted{color:var(--muted);font-size:13px}
+.kpi small{display:block;color:var(--faint);font-size:12px;margin-top:2px}
+.kpi.good b{color:var(--accent)}
+.kpi.warn b{color:var(--warn)}
+.pill.down{background:var(--warn-soft);color:var(--warn)}
+.warnt{color:var(--warn);font-weight:600}
+.ahead2{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.ahead2 h3{margin:0;font-size:15px;flex:1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;flex-wrap:wrap}
+.seg button{border:0;background:var(--panel);padding:7px 12px;cursor:pointer;font-size:13px;color:var(--muted);border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent-soft);color:var(--ink);font-weight:600}
+.split{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px}
+.flist{display:grid;gap:6px;margin-bottom:8px}
+.frow2{display:flex;gap:10px;align-items:baseline;font-size:13px}
+.frow2 .fn{min-width:28px;text-align:right;font-weight:700;color:var(--warn)}
+.frow2 .fr{flex:1;word-break:break-word}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.filters select,.filters input{border:1px solid var(--line);background:var(--bg);border-radius:8px;padding:7px 10px;min-height:36px}
+.afsearch{flex:1;min-width:200px;display:flex}.afsearch input{flex:1;min-width:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.act{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px}
+.act summary{list-style:none;cursor:pointer;padding:12px 14px}
+.act summary::-webkit-details-marker{display:none}
+.act[open] summary{border-bottom:1px solid var(--line)}
+.act-top{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px}
+.act-top .sp{flex:1}
+.act-q{font-weight:600;margin-top:6px}
+.act-body{padding:12px 14px 14px}
+.act-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);font-weight:600;margin:10px 0 6px}
+.act-label:first-child{margin-top:0}
+.act .answer p{margin:0 0 8px}.act .answer ul{margin:6px 0 8px;padding-left:20px}
+.errbox,.notebox{border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:8px;word-break:break-word}
+.errbox{background:var(--warn-soft)}.errbox b{color:var(--warn);display:block;margin-bottom:4px}
+.notebox{background:var(--soft)}.notebox b{margin-right:6px}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.steps div{background:var(--soft);border-radius:10px;padding:12px}
+.steps b{display:block;margin-bottom:4px}.steps span{font-size:13px;color:var(--muted)}
+.tl{display:grid;gap:12px}
+.tl-i{border-left:2px solid var(--line);padding-left:12px}
+.tl-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tl-t{margin:4px 0 2px}
+.mem{display:grid;gap:6px}
+.mem-r{display:grid;grid-template-columns:minmax(120px,220px) 1fr 70px;gap:10px;align-items:center;font-size:13px}
+.mem-r .n{text-align:right;font-variant-numeric:tabular-nums}
+.mem-b{height:8px;background:var(--soft);border-radius:4px;overflow:hidden}.mem-b i{display:block;height:100%;background:var(--c3)}
 @media (max-width:820px){ .set{grid-template-columns:1fr} }
+@media (max-width:600px){ .ahead .brand small,.ahead .me span,.tochat .lbl{display:none} }
 @media (max-width:820px){
   .app{grid-template-columns:1fr}
   .side{position:fixed;inset:0 auto 0 0;width:280px;z-index:5;transform:translateX(-100%);transition:transform .2s;background:var(--bg)}
@@ -209,7 +260,6 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
       <div><b>Deal Brain</b><small>Sparrow VC pipeline</small></div>
     </div>
     <button class="newchat" id="newchat"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New chat</button>
-    <button class="adminbtn" id="adminbtn" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/></svg>Admin panel</button>
     <div class="chats" id="chats"></div>
     <div class="sidefoot">
       <div class="me" id="me"></div>
@@ -240,14 +290,23 @@ pre.sql{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:12
       <div class="hint">Answers come from the fund's Notion and Tracxn data in Supabase. Check important numbers with "Show query".</div>
     </div>
     </div>
-    <div class="admin" id="admin" hidden><div class="awrap">
-      <h2 style="margin:0">Admin panel</h2>
-      <div class="atabs" id="atabs">
-        <button data-tab="users" class="on">Users</button><button data-tab="usage">Usage &amp; logs</button><button data-tab="corrections">Corrections &amp; rules</button><button data-tab="settings">Settings</button>
-      </div>
-      <div id="apane"></div>
-    </div></div>
   </main>
+</div>
+<div class="adminpage" id="adminpage" hidden>
+  <header class="ahead"><div class="ahead-in">
+    <div class="brand">
+      <div class="logo"><svg viewBox="0 0 32 32"><path d="M9 22V10h6.5a5.5 5.5 0 0 1 0 11H9" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <div><b>Deal Brain Admin</b><small>Users, usage, corrections and settings</small></div>
+    </div>
+    <a class="tochat" href="/"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="lbl">Open chat</span></a>
+    <div class="me" id="ame"></div>
+  </div></header>
+  <div class="admin" id="admin"><div class="awrap">
+    <div class="atabs" id="atabs">
+      <button data-tab="overview" class="on">Overview</button><button data-tab="activity">Activity</button><button data-tab="training">Brain training</button><button data-tab="corrections">Corrections &amp; rules</button><button data-tab="users">Users</button><button data-tab="settings">Settings</button>
+    </div>
+    <div id="apane"></div>
+  </div></div>
 </div>
 <div class="toast" id="toast"></div>
 <script type="module">
@@ -478,10 +537,13 @@ store.set = (k, v) => { try { localStorage.setItem(k, _stringify(v, (key, val) =
 // ---- Sign-in gate ----
 const GOOGLE_SVG = '<svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>';
 const LOGO = $("#gatebox .logo").outerHTML;
+const IS_ADMIN_PAGE = /^\/admin\/?$/.test(location.pathname);
+const TITLE = IS_ADMIN_PAGE ? "Deal Brain Admin" : "Deal Brain";
+if (IS_ADMIN_PAGE) document.title = "Admin · Deal Brain";
 function showGate(kind, msg){
-  $("#app").hidden = true; $("#gate").hidden = false;
+  $("#app").hidden = true; $("#adminpage").hidden = true; $("#gate").hidden = false;
   if (kind === "login") {
-    $("#gatebox").innerHTML = `${LOGO}<h1>Deal Brain</h1><p>Sparrow VC's deal pipeline, in plain English. Sign in with your Google account.</p>
+    $("#gatebox").innerHTML = `${LOGO}<h1>${TITLE}</h1><p>${IS_ADMIN_PAGE ? "Admins only. Sign in with your Google account." : "Sparrow VC's deal pipeline, in plain English. Sign in with your Google account."}</p>
       <button class="gbtn" id="glogin">${GOOGLE_SVG}<span>Continue with Google</span></button>
       ${msg && !/sign in/i.test(msg) ? `<small class="err">${esc(msg)}</small>` : ""}<small>Invite only. Ask an admin to add your email.</small>`;
     $("#glogin").onclick = async () => {
@@ -494,7 +556,7 @@ function showGate(kind, msg){
       <button class="gbtn" id="gswitch">${GOOGLE_SVG}<span>Use a different Google account</span></button>`;
     $("#gswitch").onclick = async () => { await sb.auth.signOut(); showGate("login"); };
   } else {
-    $("#gatebox").innerHTML = `${LOGO}<h1>Deal Brain</h1><p>${esc(msg || "Loading…")}</p>`;
+    $("#gatebox").innerHTML = `${LOGO}<h1>${TITLE}</h1><p>${esc(msg || "Loading…")}</p>`;
   }
 }
 function initials(n){ return String(n || "?").split(/[\s@.]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join(""); }
@@ -503,26 +565,34 @@ async function enterApp(){
   let m;
   try { m = await call({ action: "me" }); } catch { return; }
   me = m.user;
+  const meHtml = `${me.avatar ? `<img src="${esc(me.avatar)}" alt="" referrerpolicy="no-referrer">` : `<div class="av">${esc(initials(me.name || me.email))}</div>`}<span title="${esc(me.email)}">${esc(me.name || me.email)}</span><button class="linkbtn" data-signout>Sign out</button>`;
+  if (IS_ADMIN_PAGE) {
+    if (me.role !== "admin") {
+      $("#gatebox").innerHTML = `${LOGO}<h1>Admins only</h1><p>${esc(me.email)} doesn't have admin access. Ask an admin if you need it.</p>
+        <a class="gbtn" href="/" style="text-decoration:none">Go to Deal Brain chat</a>
+        <small><button class="linkbtn" id="gswitch">Use a different Google account</button></small>`;
+      $("#gswitch").onclick = async () => { await sb.auth.signOut(); showGate("login"); };
+      return;
+    }
+    $("#ame").innerHTML = meHtml;
+    $("#ame [data-signout]").onclick = async () => { await sb.auth.signOut(); location.reload(); };
+    $("#gate").hidden = true; $("#adminpage").hidden = false;
+    loadTab();
+    return;
+  }
   chatKey = "db_chats:" + me.email; curKey = "db_current:" + me.email;
   chats = store.get(chatKey, []); currentId = store.get(curKey, null);
   chats.forEach(c => c.turns = c.turns.filter(t => t.res || t.error).map(t => ({ ...t, el: null, pending: false })));
   $("#gate").hidden = true; $("#app").hidden = false;
-  $("#me").innerHTML = `${me.avatar ? `<img src="${esc(me.avatar)}" alt="" referrerpolicy="no-referrer">` : `<div class="av">${esc(initials(me.name || me.email))}</div>`}<span title="${esc(me.email)}">${esc(me.name || me.email)}</span><button class="linkbtn" id="signout">Sign out</button>`;
-  $("#signout").onclick = async () => { await sb.auth.signOut(); location.reload(); };
-  $("#adminbtn").hidden = me.role !== "admin";
+  $("#me").innerHTML = meHtml;
+  $("#me [data-signout]").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   const at = m.meta?.data_as_of; const stale = at && (Date.now() - new Date(at)) > 3 * 864e5;
   $("#asof").innerHTML = `<span class="dot ${stale ? "stale" : ""}"></span>Data as of ${esc(fmtDate(at))}`;
   $("#asof").title = `${(m.meta?.deals || 0).toLocaleString()} deals · ${(m.meta?.with_transcript || 0).toLocaleString()} call transcripts`;
   showQuota(m.quota);
   $("#banner").innerHTML = m.ready ? "" : `<div class="banner">Deal Brain is paused or being set up, so it can't answer questions right now.</div>`;
   renderSide(); renderThread();
-  if (isAdminPath()) {
-    if (me.role === "admin") showView("admin", false);
-    else { showView("chat", false); history.replaceState(null, "", "/"); toast("The admin panel is only for admins."); }
-  } else showView("chat", false);
 }
-function isAdminPath(){ return /^\/admin\/?$/.test(location.pathname); }
-window.addEventListener("popstate", () => { if (!me) return; showView(isAdminPath() && me.role === "admin" ? "admin" : "chat", false); });
 sb.auth.onAuthStateChange((ev, sess) => {
   session = sess;
   if (ev === "SIGNED_OUT") showGate("login");
@@ -536,23 +606,15 @@ sb.auth.onAuthStateChange((ev, sess) => {
 })();
 
 // ---- Admin panel ----
-let adminTab = "users";
-function showView(v, push = true){
-  $("#chatview").hidden = v !== "chat"; $("#admin").hidden = v !== "admin";
-  const path = v === "admin" ? "/admin" : "/";
-  if (push && location.pathname !== path) history.pushState(null, "", path);
-  document.title = v === "admin" ? "Admin · Deal Brain" : "Deal Brain";
-  $("#adminbtn").classList.toggle("on", v === "admin");
-  if (v === "admin") loadTab();
-}
-$("#adminbtn").onclick = () => { $("#side").classList.remove("open"); showView($("#admin").hidden ? "admin" : "chat"); };
-$("#newchat").addEventListener("click", () => showView("chat")); $("#newchat2").addEventListener("click", () => showView("chat"));
-document.addEventListener("click", e => { if (e.target.closest(".chat-item")) showView("chat"); }, true);
-$("#atabs").onclick = e => { const b = e.target.closest("[data-tab]"); if (!b) return; adminTab = b.dataset.tab; $("#atabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); loadTab(); };
+let adminTab = "overview";
+const actState = { user: "", status: "all", q: "" };
+let ovDays = 30;
+function goTab(t){ adminTab = t; $("#atabs").querySelectorAll("button").forEach(x => x.classList.toggle("on", x.dataset.tab === t)); loadTab(); }
+$("#atabs").onclick = e => { const b = e.target.closest("[data-tab]"); if (b) goTab(b.dataset.tab); };
 const ago = iso => { if (!iso) return "never"; const s = (Date.now() - new Date(iso)) / 1000; if (s < 90) return "just now"; if (s < 3600) return Math.round(s / 60) + " min ago"; if (s < 86400) return Math.round(s / 3600) + " h ago"; return Math.round(s / 86400) + " d ago"; };
 async function loadTab(){
   const p = $("#apane"); p.innerHTML = `<div class="thinking"><span class="pulse"></span><span>Loading…</span></div>`;
-  try { await ({ users: tabUsers, usage: tabUsage, corrections: tabCorrections, settings: tabSettings })[adminTab](p); }
+  try { await ({ overview: tabOverview, activity: tabActivity, training: tabTraining, users: tabUsers, corrections: tabCorrections, settings: tabSettings })[adminTab](p); }
   catch (e) { p.innerHTML = `<div class="card err">${esc(e.message)}</div>`; }
 }
 async function tabUsers(p){
@@ -578,27 +640,135 @@ async function tabUsers(p){
     const rm = tr.querySelector("[data-remove]"); if (rm) rm.onclick = async () => { if (!confirm(`Remove ${tr.dataset.email}? They will lose access immediately.`)) return; try { await call({ action: "admin_user_remove", email: tr.dataset.email }); toast("Removed."); loadTab(); } catch (er) { toast(er.message); } };
   });
 }
-async function tabUsage(p){
-  const u = await call({ action: "admin_usage", limit: 60 });
-  const max = Math.max(1, ...u.days.map(d => d.questions + d.errors));
-  const W = 700, H = 150, bw = W / u.days.length;
-  const bars = u.days.map((d, i) => { const h1 = (H - 24) * d.questions / max, h2 = (H - 24) * d.errors / max, x = i * bw + 4;
-    return `<rect x="${x}" y="${H - 20 - h1}" width="${bw - 8}" height="${h1}" rx="3" fill="var(--c1)"><title>${d.day}: ${d.questions} answered</title></rect>
-      <rect x="${x}" y="${H - 20 - h1 - h2}" width="${bw - 8}" height="${h2}" rx="3" fill="var(--c2)"><title>${d.day}: ${d.errors} failed</title></rect>
-      ${i % 2 === 0 ? `<text x="${x + (bw - 8) / 2}" y="${H - 5}" text-anchor="middle" font-size="10" fill="var(--muted)">${d.day.slice(5)}</text>` : ""}`; }).join("");
-  p.innerHTML = `<div class="kpis"><div class="kpi"><b>${u.month.questions.toLocaleString()}</b><span>questions answered this month</span></div>
-      <div class="kpi"><b>${(u.month.tokens_in + u.month.tokens_out).toLocaleString()}</b><span>AI tokens this month</span></div>
-      <div class="kpi"><b>$${u.month.est_cost_usd.toFixed(2)}</b><span>estimated AI cost this month</span></div>
-      <div class="kpi"><b>${u.people.filter(x => x.email !== "(before login)").length}</b><span>active people (30 days)</span></div></div>
-    <div class="card"><h3>Last 14 days</h3><div class="legend"><span><i style="background:var(--c1)"></i>answered</span><span><i style="background:var(--c2)"></i>failed</span></div>
-      <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${bars}</svg></div>
-    <div class="card scrollx"><h3>By person (30 days)</h3><table class="atable"><thead><tr><th>Person</th><th class="n">Questions</th><th class="n">👍</th><th class="n">👎</th><th class="n">Avg time</th><th>Last</th></tr></thead><tbody>
-      ${u.people.map(x => `<tr><td>${esc(x.email)}</td><td class="n">${x.questions}</td><td class="n">${x.up}</td><td class="n">${x.down}</td><td class="n">${x.avg_ms ? (x.avg_ms / 1000).toFixed(1) + "s" : "—"}</td><td class="muted">${esc(ago(x.last))}</td></tr>`).join("") || `<tr><td colspan="6" class="muted">No questions yet.</td></tr>`}</tbody></table></div>
-    <div class="card scrollx"><h3>Recent questions</h3><table class="atable"><thead><tr><th>When</th><th>Who</th><th>Question</th><th>Result</th><th class="n">Time</th></tr></thead><tbody>
-      ${u.recent.map(r => `<tr><td class="muted" style="white-space:nowrap">${esc(ago(r.created_at))}</td><td class="muted">${esc(r.who || "")}</td>
-        <td><details><summary>${esc(r.question)}</summary><div class="muted" style="white-space:pre-wrap;margin-top:6px">${esc(r.answer || r.error || "")}</div>${(r.sqls || []).length ? `<pre class="sql">${esc(r.sqls.join("\n\n"))}</pre>` : ""}<div class="muted">${esc(r.model || "")} · ${r.tokens_in || 0}+${r.tokens_out || 0} tokens</div></details></td>
-        <td>${r.error ? `<span class="pill bad">failed</span>` : r.rating === 1 ? `<span class="pill ok">👍</span>` : r.rating === -1 ? `<span class="pill bad">👎</span>` : `<span class="pill">answered</span>`}</td>
-        <td class="n">${r.ms ? (r.ms / 1000).toFixed(1) + "s" : ""}</td></tr>`).join("") || `<tr><td colspan="5" class="muted">Nothing yet.</td></tr>`}</tbody></table></div>`;
+const pct = (n, d) => d ? Math.round(100 * n / d) + "%" : "—";
+const secs = ms => ms ? (ms / 1000).toFixed(1) + "s" : "—";
+const when = iso => { const d = new Date(iso); return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + ", " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); };
+function statusPill(r){
+  if (r.error) return `<span class="pill bad">Failed</span>`;
+  if (r.rating === 1) return `<span class="pill ok">Upvoted</span>`;
+  if (r.rating === -1) return `<span class="pill down">Downvoted</span>`;
+  return `<span class="pill">Answered · not rated</span>`;
+}
+function barChart(series, keys, labelKey, opts = {}){
+  const W = 720, H = opts.h || 170, pad = 22, n = series.length || 1, gw = W / n;
+  const stacked = opts.stacked !== false;
+  const max = Math.max(1, ...series.map(d => stacked ? keys.reduce((a, k) => a + (d[k.key] || 0), 0) : Math.max(...keys.map(k => d[k.key] || 0))));
+  const every = Math.ceil(n / 12);
+  let g = `<line x1="0" x2="${W}" y1="${H - pad}" y2="${H - pad}" stroke="var(--line)"/>`;
+  series.forEach((d, i) => {
+    const x0 = i * gw + gw * 0.15, w = gw * 0.7;
+    let y = H - pad;
+    keys.forEach((k, j) => {
+      const v = d[k.key] || 0; if (!v) return;
+      const h = (H - pad - 8) * v / max;
+      if (stacked) { y -= h; g += `<rect x="${x0}" y="${y}" width="${w}" height="${h}" rx="2" fill="${k.color}"><title>${esc(d[labelKey])}: ${v} ${esc(k.label)}</title></rect>`; }
+      else { const bw = w / keys.length; g += `<rect x="${x0 + j * bw}" y="${H - pad - h}" width="${bw - 1}" height="${h}" rx="2" fill="${k.color}"><title>${esc(d[labelKey])}: ${v} ${esc(k.label)}</title></rect>`; }
+    });
+    if (i % every === 0) g += `<text x="${i === 0 ? x0 : x0 + w / 2}" y="${H - 6}" text-anchor="${i === 0 ? "start" : "middle"}" font-size="10" fill="var(--muted)">${esc(String(d[labelKey]).slice(5))}</text>`;
+  });
+  return `<div class="legend">${keys.map(k => `<span><i style="background:${k.color}"></i>${esc(k.label)}</span>`).join("")}</div><svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="${esc(opts.aria || "chart")}">${g}</svg>`;
+}
+function kpi(v, label, sub, cls = ""){ return `<div class="kpi ${cls}"><b>${v}</b><span>${label}</span>${sub ? `<small>${sub}</small>` : ""}</div>`; }
+
+async function tabOverview(p){
+  const o = await call({ action: "admin_overview", days: ovDays });
+  const k = o.kpis, rated = k.up + k.down;
+  p.innerHTML = `<div class="ahead2"><h3>Last ${o.days} days</h3><div class="seg" id="ovrange">${[7, 30, 90].map(d => `<button data-d="${d}" class="${d === ovDays ? "on" : ""}">${d} days</button>`).join("")}</div></div>
+    <div class="kpis">
+      ${kpi(k.total.toLocaleString(), "questions asked", `${k.people} ${k.people === 1 ? "person" : "people"} signed in`)}
+      ${kpi(k.answered.toLocaleString(), "answered", pct(k.answered, k.total) + " of questions")}
+      ${kpi(k.failed.toLocaleString(), "failed", pct(k.failed, k.total) + " of questions", k.failed ? "warn" : "")}
+      ${kpi(k.up.toLocaleString(), "upvoted", pct(k.up, k.answered) + " of answers", "good")}
+      ${kpi(k.down.toLocaleString(), "downvoted", pct(k.down, k.answered) + " of answers", k.down ? "warn" : "")}
+      ${kpi(k.unrated.toLocaleString(), "not rated", "answered, no vote")}
+      ${kpi(secs(k.avg_ms), "average answer time", "")}
+      ${kpi("$" + Number(k.est_cost_usd || 0).toFixed(2), "estimated AI cost", (k.tokens_in + k.tokens_out).toLocaleString() + " tokens")}
+    </div>
+    <div class="card"><h3>Questions per day</h3>${barChart(o.series, [{ key: "answered", label: "answered", color: "var(--c1)" }, { key: "failed", label: "failed", color: "var(--c2)" }], "day", { aria: "Questions answered and failed per day" })}</div>
+    <div class="card"><h3>Answer feedback</h3>
+      <div class="split">${[["up", "Upvoted", "var(--c1)"], ["down", "Downvoted", "var(--c2)"], ["unrated", "Not rated", "var(--faint)"]].map(([kk, l, c]) => k[kk] ? `<span style="flex:${k[kk]};background:${c}" title="${l}: ${k[kk]}"></span>` : "").join("") || `<span style="flex:1;background:var(--soft)"></span>`}</div>
+      <div class="legend" style="margin-top:8px"><span><i style="background:var(--c1)"></i>Upvoted ${k.up}</span><span><i style="background:var(--c2)"></i>Downvoted ${k.down}</span><span><i style="background:var(--faint)"></i>Not rated ${k.unrated}</span></div>
+      <p class="muted" style="margin:6px 0 0">${rated ? `${pct(k.up, rated)} of rated answers were upvoted.` : "No answers have been rated yet. Ask the team to use the thumbs on each answer; that is how the brain learns."}</p></div>
+    <div class="card scrollx"><h3>Who's asking</h3><table class="atable"><thead><tr><th>Person</th><th class="n">Asked</th><th class="n">Answered</th><th class="n">Failed</th><th class="n">Upvoted</th><th class="n">Downvoted</th><th class="n">Avg time</th><th>Last question</th><th></th></tr></thead><tbody>
+      ${o.people.map(x => `<tr><td><b>${esc(x.name || x.email)}</b>${x.name ? `<div class="muted">${esc(x.email)}</div>` : ""}</td><td class="n">${x.asked}</td><td class="n">${x.answered}</td><td class="n ${x.failed ? "warnt" : ""}">${x.failed}</td><td class="n">${x.up}</td><td class="n">${x.down}</td><td class="n">${secs(x.avg_ms)}</td><td class="muted">${esc(ago(x.last))}</td>
+        <td>${x.email.includes("@") ? `<button class="linkbtn" data-person="${esc(x.email)}">See questions</button>` : ""}</td></tr>`).join("") || `<tr><td colspan="9" class="muted">No questions in this period.</td></tr>`}</tbody></table></div>
+    <div class="card"><h3>Why questions failed</h3>
+      ${o.failures.length ? `<div class="flist">${o.failures.map(f => `<div class="frow2"><span class="fn">${f.n}</span><span class="fr">${esc(f.reason)}${f.reason.length >= 90 ? "…" : ""}</span><span class="muted">${esc(ago(f.last))}</span></div>`).join("")}</div>
+        <button class="linkbtn" id="seefailed">See every failed question</button>` : `<p class="muted" style="margin:0">No failures in this period.</p>`}</div>`;
+  $("#ovrange").onclick = e => { const b = e.target.closest("[data-d]"); if (b) { ovDays = Number(b.dataset.d); loadTab(); } };
+  p.querySelectorAll("[data-person]").forEach(b => b.onclick = () => { Object.assign(actState, { user: b.dataset.person, status: "all", q: "" }); goTab("activity"); });
+  const sf = $("#seefailed"); if (sf) sf.onclick = () => { Object.assign(actState, { user: "", status: "failed", q: "" }); goTab("activity"); };
+}
+
+function activityItem(r){
+  const sq = r.sqls || [];
+  return `<details class="act"><summary>
+      <div class="act-top">${statusPill(r)}<span class="muted">${esc(r.who || "")}</span><span class="muted">· ${esc(when(r.created_at))}</span><span class="sp"></span>
+        <span class="muted">${r.error ? "" : (r.row_count ?? 0) + (r.row_count === 1 ? " row · " : " rows · ")}${secs(r.ms)}</span></div>
+      <div class="act-q">${esc(r.question)}</div></summary>
+    <div class="act-body">
+      ${r.error ? `<div class="errbox"><b>Why it failed</b><div>${esc(r.error)}</div></div>` : `<div class="act-label">Output shown to ${esc(r.who || "them")}</div><div class="answer">${md(r.answer || "")}</div>`}
+      ${r.rating === -1 ? `<div class="notebox"><b>Their correction</b> <span class="pill">${esc(r.correction_status || "pending")}</span><div>${esc(r.correction || "(no note left)")}</div></div>` : ""}
+      ${sq.length ? `<div class="act-label">Database ${sq.length === 1 ? "query" : "queries"} the AI ran (${sq.length})</div><pre class="sql">${esc(sq.join("\n\n-- next query --\n"))}</pre>` : ""}
+      <div class="muted" style="font-size:12px;margin-top:8px">#${esc(r.id)} · ${esc(r.model || "")} · ${(r.tokens_in || 0).toLocaleString()} in / ${(r.tokens_out || 0).toLocaleString()} out tokens</div>
+    </div></details>`;
+}
+async function tabActivity(p){
+  const first = await call({ action: "admin_activity", ...actState, limit: 30 });
+  const S = [["all", "All"], ["answered", "Answered"], ["failed", "Failed"], ["up", "Upvoted"], ["down", "Downvoted"], ["unrated", "Not rated"]];
+  p.innerHTML = `<div class="card"><div class="filters">
+      <label class="sr" for="afuser">Person</label><select id="afuser"><option value="">Everyone</option>${first.users.map(u => `<option ${u === actState.user ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>
+      <div class="seg" id="afstatus">${S.map(([v, l]) => `<button data-s="${v}" class="${v === actState.status ? "on" : ""}">${l}</button>`).join("")}</div>
+      <form id="afsearch" class="afsearch"><label class="sr" for="afq">Search</label><input id="afq" type="search" placeholder="Search questions and answers" value="${esc(actState.q)}"></form>
+    </div></div>
+    <p class="muted" style="margin:0 0 10px">Every question the team has asked, newest first. Open one to see the exact answer they got, the queries behind it, and any feedback.</p>
+    <div id="alist"></div><div style="text-align:center;margin-top:12px"><button class="btn ghost" id="amore" hidden>Load more</button></div>`;
+  let rows = first.rows;
+  const draw = more => { $("#alist").innerHTML = rows.length ? rows.map(activityItem).join("") : `<div class="card muted">No questions match these filters.</div>`; $("#amore").hidden = !more; };
+  draw(first.more);
+  $("#afuser").onchange = e => { actState.user = e.target.value; loadTab(); };
+  $("#afstatus").onclick = e => { const b = e.target.closest("[data-s]"); if (b) { actState.status = b.dataset.s; loadTab(); } };
+  $("#afsearch").onsubmit = e => { e.preventDefault(); actState.q = $("#afq").value.trim(); loadTab(); };
+  $("#amore").onclick = async () => {
+    $("#amore").disabled = true;
+    try { const nx = await call({ action: "admin_activity", ...actState, limit: 30, before_id: rows[rows.length - 1].id }); rows = rows.concat(nx.rows); draw(nx.more); }
+    catch (er) { toast(er.message); } finally { $("#amore").disabled = false; }
+  };
+}
+
+const EV = {
+  example: ["Learned from an upvote", "ok", "Saved as a worked example. Similar questions now follow this answer's approach."],
+  rule: ["Team rule added", "ok", "The AI follows this on every answer."],
+  rule_off: ["Team rule (switched off)", "", "Not applied right now."],
+  correction_pending: ["Downvote waiting for review", "bad", "Approve it in Corrections to turn it into a rule."],
+  correction_approved: ["Downvote approved as a rule", "ok", ""],
+  correction_dismissed: ["Downvote dismissed", "", "No change to the brain."],
+};
+async function tabTraining(p){
+  const t = await call({ action: "admin_training" });
+  const T = t.totals;
+  const KN = { transcript: "Call transcripts", call_notes: "Call notes", deal: "Deals", call_summary: "Call summaries", funding_round: "Funding rounds (Tracxn)", founder: "Founders", investor_f3_breakup: "F3 investor breakup", f3_master: "F3 master", alumni_pattern: "Alumni patterns", investor_missed: "Investors missed", out_of_coverage: "Out of coverage", answer_example: "Worked examples (from upvotes)", insight: "Saved insights" };
+  const kmax = Math.max(1, ...t.kinds.map(x => x.n));
+  p.innerHTML = `<div class="card"><h3>How Deal Brain learns</h3>
+      <div class="steps">
+        <div><b>1 · Upvote</b><span>An upvoted answer is saved straight into memory as a worked example. When someone asks something similar, the AI is shown that example and follows the same approach.</span></div>
+        <div><b>2 · Downvote + note</b><span>A downvote with a note goes to Corrections. When an admin approves it, it becomes a team rule the AI follows on every answer. Nothing changes until it's approved.</span></div>
+        <div><b>3 · Nightly sync</b><span>Every night at 2:00 AM IST, Notion and Tracxn data is re-synced and the searchable memory is rebuilt, so new deals, notes and calls are included.</span></div>
+      </div></div>
+    <div class="kpis">
+      ${kpi(T.examples, "worked examples", T.examples_pending ? T.examples_pending + " still being indexed" : "learned from upvotes", "good")}
+      ${kpi(T.rules_active, "active team rules", T.rules_off ? T.rules_off + " switched off" : "from approved corrections")}
+      ${kpi(T.corr_pending, "corrections to review", T.corr_pending ? `<button class="linkbtn" id="gocorr">Review now</button>` : "nothing waiting", T.corr_pending ? "warn" : "")}
+      ${kpi(T.corr_approved + " / " + T.corr_dismissed, "corrections approved / dismissed", "")}
+      ${kpi(T.memory_docs.toLocaleString(), "documents in memory", "refreshed " + esc(ago(T.memory_updated)))}
+    </div>
+    <div class="card"><h3>Learning per week</h3>${barChart(t.weeks, [{ key: "examples", label: "examples from upvotes", color: "var(--c1)" }, { key: "rules", label: "rules added", color: "var(--c3)" }, { key: "downvotes", label: "downvotes", color: "var(--c2)" }], "week", { stacked: false, h: 160, aria: "Examples, rules and downvotes per week" })}</div>
+    <div class="card"><h3>Recent learning</h3>
+      ${t.events.length ? `<div class="tl">${t.events.map(e => { const [l, c, d] = EV[e.type] || [e.type, "", ""]; return `<div class="tl-i"><div class="tl-h"><span class="pill ${c}">${esc(l)}</span><span class="muted">${esc(e.who || "")} · ${esc(when(e.at))}</span></div>
+          <div class="tl-t">${esc(e.text || "")}</div>${e.type.startsWith("correction") && e.detail ? `<div class="muted">Note: ${esc(e.detail)}</div>` : ""}${d ? `<div class="muted" style="font-size:12px">${esc(d)}</div>` : ""}</div>`; }).join("")}</div>`
+        : `<p class="muted" style="margin:0">Nothing learned yet. Upvotes and approved corrections will show up here.</p>`}</div>
+    <div class="card"><h3>What's in memory</h3><div class="mem">${t.kinds.map(x => `<div class="mem-r"><span>${esc(KN[x.kind] || x.kind)}</span><span class="mem-b"><i style="width:${Math.max(1, 100 * x.n / kmax)}%"></i></span><span class="n">${x.n.toLocaleString()}</span></div>`).join("")}</div></div>`;
+  const gc = $("#gocorr"); if (gc) gc.onclick = () => goTab("corrections");
 }
 async function tabCorrections(p){
   const { items, rules } = await call({ action: "admin_corrections" });
