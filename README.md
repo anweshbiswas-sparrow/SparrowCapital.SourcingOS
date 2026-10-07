@@ -30,6 +30,7 @@ Team web app (web/index.html, hosted on Netlify) ──► Edge Function `ask`
 | `supabase/sql/01_schema_snapshot.sql` | Snapshot of tables, views, functions and cron jobs (reference / recovery). |
 | `supabase/sql/02_team_app_security.sql` | Read-only role, grants, policies and logging for the team app. |
 | `supabase/sql/03_config_seed.sql` | Non-secret settings: AI prompt (schema + rules), limits, sync toggles. |
+| `supabase/sql/04_auth_and_admin.sql` | Invite-only access list (`app_users`), per-user logging, correction review queue. |
 | `artifacts/` | Source of the Claude artifacts: Deal Brain, Notion Sync, Deal Hub (`build.js` builds `deal-hub.html` from `hub-src.html`). |
 
 ## Secrets (never commit these)
@@ -63,8 +64,13 @@ update brain_config set value = (value::jsonb || '{"provider":"openai"}')::text 
 - Edge functions: `supabase functions deploy ask nt-sync brain-embed ai-models --project-ref gdxufeytlxadbfzaorrx`
 - Web app: drag `web/` onto https://app.netlify.com/drop (or connect this repo in Netlify with publish directory `web`).
 
+## Access & admin panel
+
+- Sign-in: Google (Supabase Auth). Only emails in `app_users` with status `active` can use the app; everyone else sees "No access yet".
+- Admins get an **Admin panel** in the app: invite/block users, roles, per-user daily limits; usage & logs (14-day chart, per person, recent questions with queries); corrections review (approve 👎 notes as team rules) and rule on/off; settings (pause app, AI provider/model, limits, cost estimate, sync status).
+- Live app: https://sparrowvc-sourceos.netlify.app
+
 ## Known gaps
 
-- No login on the web app yet: anyone with the link can ask questions. Keep the link private until access control is added.
 - New deals' page notes and meeting transcripts are not part of the nightly sync; they come in via the Deal Hub "Sync page content" button.
 - Gemini free tier: low daily limits, and Google may use free-tier prompts. Enable billing (or OpenAI credits) for team-wide use.

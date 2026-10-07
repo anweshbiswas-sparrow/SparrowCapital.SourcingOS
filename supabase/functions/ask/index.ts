@@ -5,6 +5,7 @@ import postgres from "npm:postgres@3.4.5";
 // Plain-English question -> AI (Gemini or OpenAI) writes read-only SQL -> run as role ask_reader in a READ ONLY
 // transaction with a timeout -> AI writes a short answer -> JSON back to the web page.
 // The page only ever talks to this function; it never gets database or AI credentials.
+// Access: Google sign-in (Supabase Auth) + invite-only list in public.app_users; admins manage it via admin_* actions.
 
 const MAX_ROWS = 200;
 const MAX_STEPS = 6;
@@ -139,7 +140,7 @@ async function answer(question: string, history: any[], deep: boolean, settings:
   }
   messages.push({ role: "user", content: question });
 
-  // Primary provider from settings; on billing/quota/model errors switch once to the other provider (if its key is set).
+  // Primary provider from settings; on errors switch once to the other provider (if its key is set and fallback is on).
   const order = settings.provider === "openai" ? ["openai", "gemini"] : ["gemini", "openai"];
   const modelFor = (pv: string) => pv === "gemini" ? (settings.gemini_model || "gemini-2.5-flash") : (settings.model || "gpt-5-mini");
   let provider = order.find((pv) => PROVIDERS[pv].key) || order[0];
@@ -200,20 +201,131 @@ async function sourcesFor(text: string, table: any) {
   return rows.map((r: any) => ({ deal: r.deal, url: r.url, status: r.status }));
 }
 
+// ---------- Auth: Google sign-in via Supabase Auth, invite-only (public.app_users) ----------
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
+async function currentUser(req: Request) {
+  const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  if (!token) return { error: "Please sign in.", code: "signed_out" };
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } });
+  if (!r.ok) return { error: "Your session has expired. Please sign in again.", code: "signed_out" };
+  const u = await r.json();
+  const email = String(u?.email || "").toLowerCase();
+  if (!email) return { error: "Please sign in.", code: "signed_out" };
+  const [row] = await db`update app_users set last_seen = now(), name = coalesce(name, ${u?.user_metadata?.full_name ?? null})
+                         where email = ${email} returning email, name, role, status, daily_limit`;
+  if (!row) return { error: `${email} hasn't been invited to Deal Brain. Ask an admin to add you.`, code: "not_invited", email };
+  if (row.status !== "active") return { error: "Your access has been paused. Ask an admin.", code: "blocked", email };
+  return { user: { ...row, avatar: u?.user_metadata?.avatar_url ?? null } };
+}
+async function settings() {
+  const [s] = await db`select value::jsonb v from brain_config where key = 'ask_settings'`;
+  return s?.v || {};
+}
+async function quotaFor(user: any, s: any) {
+  const [c] = await db`select count(*) filter (where user_email = ${user.email})::int mine, count(*)::int team
+                       from ask_log where created_at > now() - interval '24 hours' and error is null`;
+  return { used: c.mine, limit: user.daily_limit ?? s.per_client_day ?? 40, team_used: c.team, team_limit: s.global_day ?? 400 };
+}
+const SETTING_KEYS = ["enabled", "provider", "gemini_model", "model", "fallback", "per_client_day", "global_day", "price_in_per_mtok", "price_out_per_mtok"];
+
+async function admin(action: string, body: any, me: any) {
+  switch (action) {
+    case "admin_users": {
+      const users = await db`select u.email, u.name, u.role, u.status, u.daily_limit, u.added_by, u.created_at, u.last_seen,
+          (select count(*)::int from ask_log l where l.user_email = u.email and l.created_at > now() - interval '24 hours' and l.error is null) today,
+          (select count(*)::int from ask_log l where l.user_email = u.email and l.error is null) total
+        from app_users u order by u.role, u.email`;
+      return { users };
+    }
+    case "admin_user_save": {
+      const email = String(body.email || "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw Object.assign(new Error("Enter a valid email."), { status: 400 });
+      const role = body.role === "admin" ? "admin" : "member";
+      const status = body.status === "blocked" ? "blocked" : "active";
+      const limit = body.daily_limit === "" || body.daily_limit == null ? null : Math.max(0, Math.min(1000, Number(body.daily_limit) | 0));
+      if (email === me.email && (role !== "admin" || status !== "active")) throw Object.assign(new Error("You can't remove your own admin access."), { status: 400 });
+      await db`insert into app_users (email, name, role, status, daily_limit, added_by) values (${email}, ${body.name || null}, ${role}, ${status}, ${limit}, ${me.email})
+               on conflict (email) do update set name = coalesce(excluded.name, app_users.name), role = excluded.role, status = excluded.status, daily_limit = excluded.daily_limit`;
+      return { ok: true };
+    }
+    case "admin_user_remove": {
+      const email = String(body.email || "").toLowerCase();
+      if (email === me.email) throw Object.assign(new Error("You can't remove yourself."), { status: 400 });
+      await db`with d as (delete from app_users where email = ${email} returning 1) select count(*) from d`;
+      return { ok: true };
+    }
+    case "admin_usage": {
+      const s = await settings();
+      const pin = Number(s.price_in_per_mtok ?? 0), pout = Number(s.price_out_per_mtok ?? 0);
+      const days = await db`select to_char(d, 'YYYY-MM-DD') day, coalesce(x.questions, 0)::int questions, coalesce(x.errors, 0)::int errors, coalesce(x.tin, 0)::bigint tokens_in, coalesce(x.tout, 0)::bigint tokens_out
+        from generate_series(current_date - 13, current_date, interval '1 day') d
+        left join (select created_at::date dd, count(*) filter (where error is null) questions, count(*) filter (where error is not null) errors,
+                          sum(tokens_in) tin, sum(tokens_out) tout from ask_log where created_at > current_date - 14 group by 1) x on x.dd = d::date order by d`;
+      const people = await db`select coalesce(user_email, '(before login)') email, count(*) filter (where error is null)::int questions,
+          count(*) filter (where rating = 1)::int up, count(*) filter (where rating = -1)::int down, round(avg(ms) filter (where error is null))::int avg_ms, max(created_at) last
+        from ask_log where created_at > current_date - 30 group by 1 order by 2 desc`;
+      const recent = await db`select id, created_at, coalesce(user_email, client_id) who, question, left(answer, 400) answer, error, rating, ms, model, tokens_in, tokens_out, sqls
+        from ask_log order by id desc limit ${Math.min(200, Number(body.limit) || 50)}`;
+      const [t] = await db`select coalesce(sum(tokens_in), 0)::bigint tin, coalesce(sum(tokens_out), 0)::bigint tout, count(*) filter (where error is null)::int q
+        from ask_log where created_at > date_trunc('month', current_date)`;
+      return { days, people, recent, month: { questions: t.q, tokens_in: Number(t.tin), tokens_out: Number(t.tout), est_cost_usd: Math.round((Number(t.tin) * pin + Number(t.tout) * pout) / 1e4) / 100 } };
+    }
+    case "admin_corrections": {
+      const items = await db`select id, created_at, coalesce(user_email, client_id) who, question, left(answer, 600) answer, correction, coalesce(correction_status, 'pending') status
+        from ask_log where rating = -1 order by (coalesce(correction_status, 'pending') = 'pending') desc, id desc limit 100`;
+      const rules = await db`select id, rule, source, active, created_at from brain_rules order by active desc, created_at desc limit 200`;
+      return { items, rules };
+    }
+    case "admin_correction_resolve": {
+      const id = Number(body.id); const decision = body.decision === "approve" ? "approved" : "dismissed";
+      if (decision === "approved") {
+        const rule = String(body.rule || "").trim().slice(0, 600);
+        if (!rule) throw Object.assign(new Error("Write the rule the AI should follow."), { status: 400 });
+        await db`insert into brain_rules (rule, source, active) values (${rule}, ${"team correction #" + id + " approved by " + me.email}, true)`;
+      }
+      await db`update ask_log set correction_status = ${decision} where id = ${id}`;
+      return { ok: true };
+    }
+    case "admin_rule_toggle": {
+      await db`update brain_rules set active = ${!!body.active} where id = ${Number(body.id)}`;
+      return { ok: true };
+    }
+    case "admin_rule_add": {
+      const rule = String(body.rule || "").trim().slice(0, 600);
+      if (!rule) throw Object.assign(new Error("Rule is empty."), { status: 400 });
+      await db`insert into brain_rules (rule, source, active) values (${rule}, ${"added by " + me.email}, true)`;
+      return { ok: true };
+    }
+    case "admin_settings": {
+      const s = await settings();
+      const [m] = await db`select public.ask_meta() m`;
+      const runs = await db`select distinct on (source) source, finished_at, ok, rows_synced, error from nt_sync_runs order by source, finished_at desc`;
+      return { settings: Object.fromEntries(SETTING_KEYS.map((k) => [k, s[k] ?? null])), keys: { gemini: !!PROVIDERS.gemini.key, openai: !!PROVIDERS.openai.key }, meta: m.m, syncs: runs };
+    }
+    case "admin_settings_save": {
+      const s = await settings(); const p = body.settings || {}; const out: any = { ...s };
+      if ("enabled" in p) out.enabled = !!p.enabled;
+      if ("fallback" in p) out.fallback = !!p.fallback;
+      if (p.provider === "gemini" || p.provider === "openai") out.provider = p.provider;
+      for (const k of ["gemini_model", "model"]) if (typeof p[k] === "string" && /^[\w.\-:]{2,80}$/.test(p[k])) out[k] = p[k];
+      for (const k of ["per_client_day", "global_day"]) if (p[k] !== undefined && p[k] !== "") out[k] = Math.max(0, Math.min(100000, Number(p[k]) | 0));
+      for (const k of ["price_in_per_mtok", "price_out_per_mtok"]) if (p[k] !== undefined && p[k] !== "") out[k] = Math.max(0, Number(p[k]) || 0);
+      await db`update brain_config set value = ${JSON.stringify(out)} where key = 'ask_settings'`;
+      return { ok: true };
+    }
+  }
+  throw Object.assign(new Error("Unknown action."), { status: 400 });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   const body = await req.json().catch(() => ({}));
-  const action = body.action || "ask";
-  const client = String(body.client_id || "").slice(0, 64) || "anon";
+  const action = String(body.action || "ask");
   const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim().slice(0, 64);
 
   try {
-    if (action === "meta") {
-      const [r] = await db`select public.ask_meta() m, public.ask_quota(${client}) q`;
-      return json({ meta: r.m, quota: { used: r.q.client_used, limit: r.q.client_limit }, ready: !!OPENAI_KEY && r.q.enabled });
-    }
-
     if (action === "selftest") {
       // Owner-only check of the SQL sandbox (needs the internal secret; never called by the web page).
       const [sec] = await db`select value from brain_config where key = 'embed_secret'`;
@@ -221,49 +333,65 @@ Deno.serve(async (req: Request) => {
       const tryq = async (q: string) => { try { const t = await runSql(q); return { ok: true, rows: t.rows.slice(0, 3), columns: t.columns }; } catch (e: any) { return { ok: false, error: String(e.message || e).slice(0, 200) }; } };
       return json({
         read: await tryq("select status, count(*) as deals from v_raw_data group by 1 order by 2 desc"),
-        search: await tryq("select title, round(similarity::numeric,3) as sim from brain_search('washing machine durability', 2)"),
         config: await tryq("select key from brain_config"),
+        users: await tryq("select email from app_users"),
+        log: await tryq("select id from ask_log limit 1"),
         write_cte: await tryq("with x as (update nt_deal_pipeline set comments = comments where false returning 1) select count(*) from x"),
-        blocked_fn: await tryq("select brain_request_refresh()"),
-        multi: await tryq("select 1; select 2"),
-        prompt: (await promptParts()).schema.length,
-        keys: { openai: !!PROVIDERS.openai.key, gemini: !!PROVIDERS.gemini.key },
+        keys: { openai: !!PROVIDERS.openai.key, gemini: !!PROVIDERS.gemini.key, anon: !!ANON_KEY },
       });
+    }
+
+    // Everything else needs a signed-in, invited user.
+    const auth: any = await currentUser(req);
+    if (!auth.user) return json({ error: auth.error, code: auth.code, email: auth.email ?? null }, auth.code === "signed_out" ? 401 : 403);
+    const me = auth.user;
+
+    if (action.startsWith("admin_")) {
+      if (me.role !== "admin") return json({ error: "Admins only." }, 403);
+      try { return json(await admin(action, body, me)); }
+      catch (e: any) { return json({ error: String(e.message || e) }, e.status || 500); }
+    }
+
+    if (action === "me") {
+      const s = await settings();
+      const [m] = await db`select public.ask_meta() m`;
+      return json({ user: me, quota: await quotaFor(me, s), meta: m.m, ready: !!OPENAI_KEY && s.enabled !== false });
     }
 
     if (action === "feedback") {
       const id = Number(body.log_id); const rating = Number(body.rating) === 1 ? 1 : -1;
       if (!id) return json({ error: "log_id required" }, 400);
-      const [log] = await db`select id, question, answer, sqls, client_id from ask_log where id = ${id}`;
-      if (!log || log.client_id !== client) return json({ error: "not found" }, 404);
-      const correction = String(body.correction || "").slice(0, 600);
-      // Thumbs up becomes a worked example right away; corrections are kept for the owner to review (never auto-rules).
+      const [log] = await db`select id, question, answer, sqls, user_email from ask_log where id = ${id}`;
+      if (!log || log.user_email !== me.email) return json({ error: "not found" }, 404);
+      const correction = String(body.correction || "").trim().slice(0, 600);
+      // Thumbs up becomes a worked example right away; corrections wait for an admin (never auto-rules).
       const [fb] = await db`select public.brain_save_feedback(${db.json({
-        chat_id: "team:" + client, question: log.question, answer: log.answer,
+        chat_id: "team:" + me.email, question: log.question, answer: log.answer,
         sql: (log.sqls || []).slice(-1)[0] || "", rating, correction, make_rule: false,
       })}) r`;
       await db`update ask_log set rating = ${rating}, feedback_id = ${fb.r?.feedback_id ?? null},
-               error = case when ${correction} <> '' then coalesce(error || ' | ', '') || 'correction: ' || ${correction} else error end where id = ${id}`;
+               correction = ${correction || null}, correction_status = ${rating === -1 ? "pending" : null} where id = ${id}`;
       return json({ ok: true });
     }
 
     // ---- ask ----
     const question = String(body.question || "").trim().slice(0, 1000);
     if (!question) return json({ error: "Ask a question." }, 400);
-    if (!OPENAI_KEY) return json({ error: "The app isn't switched on yet: no AI key has been added in Supabase." }, 503);
-    const [{ q }] = await db`select public.ask_quota(${client}) q`;
-    if (!q.enabled) return json({ error: "Deal Brain is paused by the owner." }, 503);
-    if (q.client_used >= q.client_limit) return json({ error: `Daily limit reached (${q.client_limit} questions). It resets 24 hours after your earliest question today.` }, 429);
-    if (q.global_used >= q.global_limit) return json({ error: "The team's daily question limit has been reached. Try again tomorrow." }, 429);
+    if (!OPENAI_KEY) return json({ error: "No AI key has been added in Supabase yet." }, 503);
+    const s = await settings();
+    if (s.enabled === false) return json({ error: "Deal Brain is paused by an admin." }, 503);
+    const quota = await quotaFor(me, s);
+    if (quota.used >= quota.limit) return json({ error: `Daily limit reached (${quota.limit} questions). It resets over the next 24 hours.` }, 429);
+    if (quota.team_used >= quota.team_limit) return json({ error: "The team's daily question limit has been reached. Try again tomorrow." }, 429);
 
     const t0 = Date.now();
     let out: any, err: string | null = null;
-    try { out = await answer(question, body.history, !!body.deep, q); }
+    try { out = await answer(question, body.history, !!body.deep, s); }
     catch (e: any) { err = String(e.message || e); }
     const ms = Date.now() - t0;
-    const [log] = await db`insert into ask_log (client_id, ip, question, sqls, answer, row_count, ms, model, tokens_in, tokens_out, error)
-      values (${client}, ${ip}, ${question}, ${db.json(out?.sqls || [])}, ${out?.text || null}, ${out?.table?.rows?.length ?? null}, ${ms},
-              ${out?.model || q.provider || ""}, ${out?.tokensIn || 0}, ${out?.tokensOut || 0}, ${err}) returning id`;
+    const [log] = await db`insert into ask_log (client_id, user_email, ip, question, sqls, answer, row_count, ms, model, tokens_in, tokens_out, error)
+      values (${me.email}, ${me.email}, ${ip}, ${question}, ${db.json(out?.sqls || [])}, ${out?.text || null}, ${out?.table?.rows?.length ?? null}, ${ms},
+              ${out?.model || s.provider || ""}, ${out?.tokensIn || 0}, ${out?.tokensOut || 0}, ${err}) returning id`;
     if (err) {
       const friendly = /api key|401|incorrect|key not set/i.test(err) ? "The AI key in Supabase isn't valid." :
         /quota|billing|credit|429|rate|demand|overload|503/i.test(err) ? "The AI service is busy right now. Wait a minute and try again." :
@@ -276,7 +404,7 @@ Deno.serve(async (req: Request) => {
       log_id: log.id, answer: out.text, followups: out.followups, sources,
       table: out.table ? { columns: out.table.columns, numeric: out.table.numeric, rows: out.table.rows, truncated: out.table.truncated } : null,
       sql: out.sqls, ms, model: out.model, data_as_of: meta.m.data_as_of,
-      quota: { used: q.client_used + 1, limit: q.client_limit },
+      quota: { ...quota, used: quota.used + 1 },
     });
   } catch (e: any) {
     console.error(e);
