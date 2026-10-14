@@ -181,6 +181,41 @@ function unverifiedNames(text: string, haystack: string, question: string) {
   }
   return [...new Set(out)];
 }
+// ---------- One table per distinct piece of data ----------
+// A table is dropped when another table already shows all of its rows and values (e.g. a Swiggy-only list inside the
+// full Swiggy + Zomato list, or the same list queried twice under different titles). Identical tables keep the later one.
+// A one-row, all-number summary (a count line) is not shown next to other tables: its numbers belong in the answer text.
+function normCell(v: any) { return v == null ? "" : String(v).toLowerCase().replace(/[^a-z0-9.]+/g, " ").trim(); }
+// b covers a when (almost) every row of a has a row in b that contains at least 90% of its values, in any column order.
+function covers(b: any, a: any) {
+  if (!a.rows.length) return true;
+  if (a.rows.length > b.rows.length) return false;
+  const bRows: string[][] = b.rows.map((r: any[]) => r.map(normCell).filter(Boolean));
+  const where = new Map<string, number[]>();
+  bRows.forEach((cells, i) => { for (const c of new Set(cells)) { if (!where.has(c)) where.set(c, []); where.get(c)!.push(i); } });
+  let covered = 0;
+  for (const r of a.rows) {
+    const cells: string[] = r.map(normCell).filter(Boolean);
+    if (!cells.length) { covered++; continue; }
+    let cand: number[] | null = null;
+    for (const c of cells) { const w = where.get(c); if (w && (!cand || w.length < cand.length)) cand = w; }
+    if (!cand) continue;
+    const hit = cand.slice(0, 200).some((i) => {
+      const row = bRows[i];
+      const n = cells.filter((c) => row.some((x) => x === c || (c.length > 3 && x.includes(c)))).length;
+      return n / cells.length >= 0.9; // a table with a genuinely extra column is kept
+    });
+    if (hit) covered++;
+  }
+  return covered / a.rows.length >= 0.95;
+}
+function pruneTables(tables: any[], _text: string) {
+  const list = tables.filter((t) => t.rows.length);
+  if (!list.length) return tables.slice(0, 1);
+  const keep = list.filter((a, i) => !list.some((b, j) => j !== i && covers(b, a) && (!covers(a, b) || j > i)));
+  const out = keep.length > 1 ? keep.filter((t) => !(t.rows.length === 1 && t.numeric.every(Boolean))) : keep;
+  return out.length ? out : keep;
+}
 // Playbooks (public.brain_playbooks): for known question types the right queries are run up front, so every
 // part of a multi-part question has its data even when only the small model is available.
 let playbookCache: { at: number; v: any[] } | null = null;
@@ -234,8 +269,9 @@ async function answer(question: string, history: any[], deep: boolean, settings:
       const title = String(picked[i].title);
       sqls.push(t.sql); if (t.rows.length) last = t;
       haystack += JSON.stringify(t.rows).toLowerCase() + " ";
-      tables.push({ title, columns: t.columns, numeric: t.numeric, rows: t.rows, truncated: t.truncated });
-      parts.push(`Table "${title}": ${toolPayload(t)}`);
+      // hidden: data the AI uses for its text (e.g. counts) but that is not shown as a table
+      if (!picked[i].hidden) tables.push({ title, columns: t.columns, numeric: t.numeric, rows: t.rows, truncated: t.truncated });
+      parts.push(`${picked[i].hidden ? "Data (not shown as a table)" : "Table"} "${title}": ${toolPayload(t)}`);
     });
     if (parts.length) {
       const m = messages[messages.length - 1];
@@ -341,7 +377,19 @@ async function answer(question: string, history: any[], deep: boolean, settings:
   }
   text = text.replace(/\n?[ \t]*FOLLOWUPS:.*$/gim, "").trim(); // a rewrite may repeat the suggestions line
   if (!text) text = "I couldn't finish this one. Try asking more specifically.";
-  return { text, followups, table: last, tables: tables.length ? tables : null, sqls, model: provider + ":" + model, tokensIn, tokensOut, complex, verified: !bad.length, trace };
+  const shownTables = tables.length ? pruneTables(tables, text) : [];
+  if (shownTables.length < tables.length) trace.push({ tables_dropped: tables.length - shownTables.length });
+  return { text, followups, table: last, tables: shownTables.length ? shownTables : null, sqls, model: provider + ":" + model, tokensIn, tokensOut, complex, verified: !bad.length, trace };
+}
+
+// ---------- Answer cache: same question + same data + same rules => same answer ----------
+async function cacheKeyFor(question: string, history: any[], deep: boolean) {
+  const norm = (x: string) => String(x || "").toLowerCase().replace(/\s+/g, " ").replace(/[\s?.!]+$/, "").trim();
+  const hist = (history || []).slice(-3).map((h: any) => norm(h?.q));
+  const [[v], m] = await Promise.all([db`select public.ask_cache_version() v`, meta()]);
+  const raw = JSON.stringify([norm(question), hist, !!deep, m?.data_as_of ?? null, v?.v ?? ""]);
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function sourcesFor(text: string, table: any) {
@@ -626,6 +674,35 @@ Deno.serve(async (req: Request) => {
       return json({ user: me, quota, meta: m, ready: !!OPENAI_KEY && s.enabled !== false });
     }
 
+    // ---- shareable chat links (/c/<id>): a snapshot any signed-in, invited user can open ----
+    if (action === "share_create") {
+      const chatId = String(body.chat_id || "").slice(0, 64);
+      const turns = Array.isArray(body.turns) ? body.turns.slice(0, 100) : [];
+      if (!chatId || !turns.length) return json({ error: "Nothing to share yet." }, 400);
+      const payload = JSON.stringify(turns);
+      if (payload.length > 3_000_000) return json({ error: "This chat is too large to share. Try sharing a shorter chat." }, 413);
+      const title = String(body.title || "").slice(0, 120) || null;
+      const id = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+      const [row] = await db`insert into shared_chats (id, owner_email, client_chat_id, title, turns)
+        values (${id}, ${me.email}, ${chatId}, ${title}, ${db.json(turns)})
+        on conflict (owner_email, client_chat_id) do update set title = excluded.title, turns = excluded.turns, updated_at = now()
+        returning id`;
+      return json({ id: row.id });
+    }
+    if (action === "share_get") {
+      const id = String(body.id || "").slice(0, 32);
+      const [row] = await db`update shared_chats s set views = views + 1 where id = ${id}
+        returning s.id, s.title, s.turns, s.owner_email, s.created_at, s.updated_at, s.views,
+                  (select name from app_users u where u.email = s.owner_email) owner_name`;
+      if (!row) return json({ error: "This shared chat doesn't exist or was unshared." }, 404);
+      return json({ chat: { ...row, mine: row.owner_email === me.email } });
+    }
+    if (action === "share_delete") {
+      const id = String(body.id || "").slice(0, 32), chatId = String(body.chat_id || "").slice(0, 64);
+      await db`delete from shared_chats where owner_email = ${me.email} and (id = ${id} or client_chat_id = ${chatId})`;
+      return json({ ok: true });
+    }
+
     if (action === "feedback") {
       const id = Number(body.log_id); const rating = Number(body.rating) === 1 ? 1 : -1;
       if (!id) return json({ error: "log_id required" }, 400);
@@ -637,6 +714,7 @@ Deno.serve(async (req: Request) => {
         chat_id: "team:" + me.email, question: log.question, answer: log.answer,
         sql: (log.sqls || []).slice(-1)[0] || "", rating, correction, make_rule: false,
       })}) r`;
+      if (rating === -1) await db`delete from ask_cache where log_id = ${id} or response->>'answer' = ${log.answer ?? ""}`.catch(() => null);
       await db`update ask_log set rating = ${rating}, feedback_id = ${fb.r?.feedback_id ?? null},
                correction = ${correction || null}, correction_status = ${rating === -1 ? "pending" : null} where id = ${id}`;
       return json({ ok: true });
@@ -653,6 +731,18 @@ Deno.serve(async (req: Request) => {
     if (quota.team_used >= quota.team_limit) return json({ error: "The team's daily question limit has been reached. Try again tomorrow." }, 429);
 
     const t0 = Date.now();
+    const cacheKey = await cacheKeyFor(question, body.history, !!body.deep).catch(() => null);
+    if (cacheKey && body.fresh !== true) {
+      const [hit] = await db`update ask_cache set hits = hits + 1, used_at = now() where key = ${cacheKey} and created_at > now() - interval '14 days' returning response`.catch(() => []);
+      if (hit?.response?.answer) {
+        const r = hit.response; const ms = Date.now() - t0;
+        const [log] = await db`insert into ask_log (client_id, user_email, ip, question, sqls, answer, row_count, ms, model, tokens_in, tokens_out, error)
+          values (${me.email}, ${me.email}, ${ip}, ${question}, ${db.json(r.sql || [])}, ${r.answer}, ${r.table?.rows?.length ?? null}, ${ms}, ${"cache:" + (r.model || "")}, 0, 0, null) returning id`;
+        await db`update ask_cache set log_id = ${log.id} where key = ${cacheKey}`.catch(() => null);
+        const m = await meta();
+        return json({ ...r, log_id: log.id, ms, cached: true, data_as_of: m.data_as_of, quota: { ...quota, used: quota.used + 1 } });
+      }
+    }
     let out: any, err: string | null = null;
     try { out = await answer(question, body.history, !!body.deep, s); }
     catch (e: any) { err = String(e.message || e); }
@@ -667,13 +757,17 @@ Deno.serve(async (req: Request) => {
       return json({ error: friendly, log_id: log.id }, 502);
     }
     const [sources, m] = await Promise.all([sourcesFor(out.text, out.table), meta()]);
-    return json({
-      log_id: log.id, answer: out.text, followups: out.followups, sources,
+    const payload = {
+      answer: out.text, followups: out.followups, sources,
       table: out.table ? { columns: out.table.columns, numeric: out.table.numeric, rows: out.table.rows, truncated: out.table.truncated } : null,
       tables: out.tables,
-      sql: out.sqls, ms, model: out.model, data_as_of: m.data_as_of,
-      quota: { ...quota, used: quota.used + 1 },
-    });
+      sql: out.sqls, model: out.model,
+    };
+    if (cacheKey && out.verified && !/^I couldn't finish this one/.test(out.text)) {
+      await db`insert into ask_cache (key, question, response, log_id) values (${cacheKey}, ${question}, ${db.json(payload)}, ${log.id})
+               on conflict (key) do update set response = excluded.response, log_id = excluded.log_id, created_at = now(), used_at = now(), hits = 0`.catch((e) => console.error("cache", e));
+    }
+    return json({ ...payload, log_id: log.id, ms, data_as_of: m.data_as_of, quota: { ...quota, used: quota.used + 1 } });
   } catch (e: any) {
     console.error(e);
     return json({ error: "Server error. Try again in a moment." }, 500);
