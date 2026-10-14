@@ -381,7 +381,7 @@ let chats = [];          // [{id, title, turns:[{q, a, res}]}]
 let currentId = null;
 let busy = false;
 // Shared chat links: /c/<id> opens a read-only copy of someone's chat for any signed-in, invited teammate.
-const SHARE_PATH = /^\/c\/([A-Za-z0-9_-]{6,32})\/?$/;
+const SHARE_PATH = /^\/c\/([A-Za-z0-9_-]{1,32})\/?$/;
 let shareId = (location.pathname.match(SHARE_PATH) || [])[1] || null;
 let shared = null;       // {id, title, turns, owner_name, owner_email, updated_at, mine} while viewing a shared link
 const shareUrl = id => location.origin + "/c/" + id;
